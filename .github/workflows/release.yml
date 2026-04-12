@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -14,51 +14,68 @@ jobs:
       - name: Select Xcode 16
         run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
 
-      - name: Build Release Archive
+      - name: Show build environment
         run: |
-          xcodebuild archive \
-            -project Fallow/Fallow.xcodeproj \
-            -scheme Fallow \
-            -archivePath build/Fallow.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+          xcodebuild -version
+          swift --version
 
-      # TODO: Code signing with Developer ID
-      # Requires secrets:
-      #   APPLE_DEVELOPER_CERTIFICATE_P12_BASE64
-      #   APPLE_DEVELOPER_CERTIFICATE_PASSWORD
-      #   APPLE_TEAM_ID
-      #
-      # Steps:
-      # 1. Import certificate from secrets into temporary keychain
-      # 2. Re-sign kwaainet and p2pd binaries with Developer ID
-      # 3. Sign the app with Developer ID Application certificate
-      # 4. Verify with: codesign --verify --deep --strict Fallow.app
+      - name: Build unsigned DMG
+        run: ./scripts/build-dmg.sh
 
-      # TODO: Notarisation with Apple
-      # Requires secrets:
-      #   APPLE_ID
-      #   APPLE_APP_SPECIFIC_PASSWORD
-      #   APPLE_TEAM_ID
-      #
-      # Steps:
-      # 1. Create ZIP or DMG of signed app
-      # 2. xcrun notarytool submit --apple-id ... --password ... --team-id ...
-      # 3. xcrun notarytool wait <submission-id>
-      # 4. xcrun stapler staple Fallow.app
+      - name: Upload unsigned DMG as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallow-unsigned
+          path: build/Fallow.dmg
 
-      # TODO: Create DMG
-      # Steps:
-      # 1. Create temporary DMG directory
-      # 2. Copy Fallow.app into it
-      # 3. Add Applications symlink
-      # 4. hdiutil create -volname Fallow -srcfolder ... -ov -format UDZO Fallow.dmg
-      # 5. Staple the DMG: xcrun stapler staple Fallow.dmg
+  # Signing and notarisation: uncomment when secrets are configured.
+  # Required secrets:
+  #   DEVELOPER_CERTIFICATE_P12_BASE64 - Base64-encoded .p12 certificate
+  #   DEVELOPER_CERTIFICATE_PASSWORD   - Password for the .p12 certificate
+  #   APPLE_TEAM_ID                    - Apple Developer Team ID
+  #   APPLE_ID                         - Apple ID email
+  #   APPLE_APP_SPECIFIC_PASSWORD      - App-specific password
+  #
+  # sign-and-notarise:
+  #   needs: build
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Select Xcode 16
+  #       run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+  #     - name: Import signing certificate
+  #       env:
+  #         P12_BASE64: ${{ secrets.DEVELOPER_CERTIFICATE_P12_BASE64 }}
+  #         P12_PASSWORD: ${{ secrets.DEVELOPER_CERTIFICATE_PASSWORD }}
+  #       run: |
+  #         echo "$P12_BASE64" | base64 --decode > cert.p12
+  #         security create-keychain -p "" build.keychain
+  #         security default-keychain -s build.keychain
+  #         security unlock-keychain -p "" build.keychain
+  #         security import cert.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
+  #         security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+  #         rm cert.p12
+  #     - name: Build signed and notarised DMG
+  #       env:
+  #         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  #         APPLE_ID: ${{ secrets.APPLE_ID }}
+  #         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+  #       run: ./scripts/build-dmg.sh --sign --notarise
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download DMG artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Fallow-unsigned
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           draft: true
-          # files: build/Fallow.dmg  # Uncomment when DMG creation is implemented
+          files: Fallow.dmg

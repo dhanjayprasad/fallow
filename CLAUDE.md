@@ -86,9 +86,11 @@ fallow/
         SettingsView.swift         -- Governor configuration
       Resources/
         Assets.xcassets/           -- App icon assets
+  scripts/
+    build-dmg.sh                   -- Build, sign, and notarise a DMG
   .claude/
-    agents/                        -- Custom Claude Code agents
-    skills/                        -- Custom Claude Code skills
+    agents/                        -- Custom Claude Code agents (4)
+    skills/                        -- Custom Claude Code skills (6)
   .github/
     workflows/build.yml            -- CI build (SPM + Xcode)
     workflows/release.yml          -- Release pipeline (WIP)
@@ -122,3 +124,12 @@ This project uses custom Claude Code agents for architecture review and critique
 - **swift-expert** - Reviews Swift/SwiftUI code for idiomatic patterns, performance, and Apple platform best practices
 
 Use these agents for iterative review: write a plan or code, invoke the relevant agent to critique it, address the feedback, repeat.
+
+Key skills:
+
+- **/weekend-prototype** - Guided initial prototype build
+- **/kwaainet-integration** - KwaaiNet CLI, API, and gotchas reference
+- **/architecture-review** - Multi-agent review cycle
+- **/release** - Build, sign, and distribute a DMG
+- **/debug-kwaainet** - Troubleshoot KwaaiNet integration issues
+- **/add-feature** - Step-by-step guide for contributing a new feature
