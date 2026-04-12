@@ -24,8 +24,15 @@ struct ChatView: View {
     @State private var inputText = ""
     @State private var isStreaming = false
     @State private var streamTask: Task<Void, Never>?
+    @State private var scrollTrigger = 0
 
     private let creditsPerMessage: Double = 0.5
+
+    private static let chatSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        return URLSession(configuration: config)
+    }()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,9 +68,11 @@ struct ChatView: View {
                     }
                     .padding()
                 }
-                .onChange(of: messages.count) {
+                .onChange(of: scrollTrigger) {
                     if let last = messages.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -164,10 +173,7 @@ struct ChatView: View {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30
-            let session = URLSession(configuration: config)
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await Self.chatSession.bytes(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 updateMessage(id: messageId, content: "Error: API not available. Is the node running?")
                 return
@@ -211,6 +217,7 @@ struct ChatView: View {
     private func appendToMessage(id: UUID, content: String) {
         guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[idx].content += content
+        scrollTrigger += 1
     }
 }
 

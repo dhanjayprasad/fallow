@@ -173,7 +173,7 @@ final class KwaaiNetManager {
         guard let modelsURL = URL(string: "http://localhost:8000/v1/models") else { return }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: modelsURL)
+            let (data, _) = try await Self.healthSession.data(from: modelsURL)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let models = json["data"] as? [[String: Any]],
                let firstModel = models.first,

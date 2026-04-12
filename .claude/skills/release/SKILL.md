@@ -10,7 +10,7 @@ Build and distribute a new version of Fallow.
 ## Pre-release Checklist
 
 Before building:
-1. All tests pass (`swift build` succeeds with zero errors)
+1. Build succeeds (`cd Fallow && swift build` with zero errors)
 2. CHANGELOG.md is updated with the new version's changes
 3. Version numbers are bumped in Info.plist (`CFBundleShortVersionString`) and project build settings (`MARKETING_VERSION`)
 4. The KwaaiNet binary is bundled at `Fallow.app/Contents/Helpers/kwaainet` (and `p2pd`)

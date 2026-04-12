@@ -122,12 +122,13 @@ This project uses custom Claude Code agents for architecture review and critique
 - **product-critic** - Evaluates from a user/product perspective, challenges scope, identifies UX gaps
 - **security-reviewer** - Audits trust model, sandboxing, data handling, and macOS security patterns
 - **swift-expert** - Reviews Swift/SwiftUI code for idiomatic patterns, performance, and Apple platform best practices
+- **ux-reviewer** - Reviews views for accessibility, HIG compliance, keyboard navigation, and display handling
 
 Use these agents for iterative review: write a plan or code, invoke the relevant agent to critique it, address the feedback, repeat.
 
 Key skills:
 
-- **/weekend-prototype** - Quick-start codebase tour for new contributors
+- **/quick-start** - Codebase tour and orientation for new contributors
 - **/kwaainet-integration** - KwaaiNet CLI, API, and gotchas reference
 - **/architecture-review** - Multi-agent review cycle
 - **/release** - Build, sign, and distribute a DMG

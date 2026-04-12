@@ -14,8 +14,8 @@ Thank you for your interest in contributing to Fallow. This document explains ho
 
 ### Prerequisites
 
-- macOS 14.2+
-- Xcode 16+
+- macOS 14.0+
+- Xcode 16+ (or just Swift 6.0+ for CLI builds)
 - [KwaaiNet CLI](https://github.com/Kwaai-AI-Lab/KwaaiNet/releases/latest) (for integration testing)
 
 ### Building
@@ -27,19 +27,13 @@ xcodebuild build -scheme Fallow -destination 'platform=macOS'
 
 Or open `Fallow/Fallow.xcodeproj` in Xcode and press Cmd+B.
 
-### Testing
-
-```bash
-xcodebuild test -scheme Fallow -destination 'platform=macOS'
-```
-
 ### Running
 
 Open `Fallow/Fallow.xcodeproj` in Xcode, select the Fallow scheme, and press Cmd+R. The app appears in the menu bar (no Dock icon).
 
 ## Code Style
 
-- Swift 6.0+, targeting macOS 14.2+
+- Swift 6.0+, targeting macOS 14.0+
 - Use the Observation framework (`@Observable`), not Combine, for new code
 - Use `async/await` and structured concurrency, not completion handlers
 - NZ English spelling throughout (organisation, behaviour, colour, licence)

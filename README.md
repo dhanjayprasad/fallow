@@ -15,7 +15,7 @@ You never notice it running. Your Mac works for you while you sleep.
 
 ## Status
 
-**Pre-release.** Currently building the weekend prototype to validate the KwaaiNet integration.
+**Pre-release.** v0.1 is under active development. The core app compiles and runs; integration testing with a live KwaaiNet node is in progress.
 
 ## Architecture
 

@@ -50,9 +50,9 @@ build/
 *~
 .vscode/
 
-# KwaaiNet binary (bundled at release time, not in source)
-Fallow/Resources/kwaainet
-Fallow/Resources/p2pd
+# KwaaiNet binaries (bundled at release time, not in source)
+Fallow/Fallow/Resources/kwaainet
+Fallow/Fallow/Resources/p2pd
 
 # Environment and secrets
 .env
