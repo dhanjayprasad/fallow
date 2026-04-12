@@ -59,8 +59,9 @@ kwaainet benchmark
 
 ```bash
 claude                    # Open Claude Code
-/weekend-prototype        # Guided prototype build
+/quick-start              # Codebase tour and orientation
 /architecture-review      # Multi-agent review cycle
+/debug-kwaainet           # Troubleshoot integration issues
 ```
 
 ## Contributing

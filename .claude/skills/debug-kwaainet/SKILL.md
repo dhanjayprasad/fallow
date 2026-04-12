@@ -5,7 +5,7 @@ description: Troubleshoot KwaaiNet integration issues. Use when kwaainet fails t
 
 # Debug KwaaiNet Skill
 
-Systematic troubleshooting for KwaaiNet integration problems.
+Systematic troubleshooting for KwaaiNet integration problems. Tested against v0.4.1.
 
 ## Step 1: Is kwaainet installed?
 
@@ -20,40 +20,48 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Kwaai-AI-Lab/KwaaiNet/r
 kwaainet setup
 ```
 
-## Step 2: Can the daemon start?
+## Step 2: Has setup been run?
+
+```bash
+ls ~/.kwaainet/config.yaml
+```
+
+If missing, run `kwaainet setup`. Fallow auto-detects this and runs setup on first launch.
+
+## Step 3: Can the P2P daemon start?
 
 ```bash
 kwaainet start --daemon
 echo "Exit code: $?"
+kwaainet status
 ```
+
+Expected: status shows "Running" with a PID. The daemon uses port 8080 via p2pd.
 
 Common failures:
-- **"port already in use"**: Another service on port 8080 or 8000. Check with `lsof -i :8080` and `lsof -i :8000`.
-- **"identity not found"**: Run `kwaainet setup` first.
-- **"model not found"**: First run needs to download model weights. This can take minutes. Watch logs.
+- **"port already in use"**: Another service on port 8080. Check with `lsof -i :8080`.
+- **"already running"**: Daemon is already up. Check with `kwaainet status`.
 
-## Step 3: Is the health endpoint responding?
-
-```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health
-```
-
-Expected: `200`. If no response, the daemon is not running or is still starting.
-
-## Step 4: Is the API endpoint responding?
+## Step 4: Can the local API server start?
 
 ```bash
-curl -s http://localhost:8000/v1/models | python3 -m json.tool
+kwaainet serve --port 11435 llama3.1:8b &
+sleep 15  # Model loading takes ~12s
+curl -s http://localhost:11435/v1/models
 ```
 
-Expected: JSON with `data` array containing model objects. The `id` field is what Fallow sends in chat requests.
+Expected: JSON with `data` array containing model objects.
+
+Common failures:
+- **"Model not found in local cache"**: The model must be available locally (e.g., via Ollama). Install it: `ollama pull llama3.1:8b`
+- **Port 11435 in use**: Check with `lsof -i :11435`.
 
 ## Step 5: Can chat completions work?
 
 ```bash
-curl -s http://localhost:8000/v1/chat/completions \
+curl -s http://localhost:11435/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"default","messages":[{"role":"user","content":"hello"}],"stream":false}'
+  -d '{"model":"llama3.1:8b","messages":[{"role":"user","content":"hello"}],"stream":false}'
 ```
 
 Expected: JSON response with `choices[0].message.content`.
@@ -64,7 +72,7 @@ In the Fallow source, `KwaaiNetManager.binaryPath` resolves the binary:
 1. First checks `Bundle.main.url(forAuxiliaryExecutable: "kwaainet")`
 2. In DEBUG builds only, falls back to `ProcessRunner.findInPath("kwaainet")`
 
-If running from Xcode, the bundle path won't have kwaainet. Make sure kwaainet is in your PATH for development.
+If running from SPM or Xcode without bundled binary, make sure kwaainet is in your PATH.
 
 ## Step 7: Check system state
 
@@ -72,8 +80,8 @@ If running from Xcode, the bundle path won't have kwaainet. Make sure kwaainet i
 # Power source
 pmset -g batt
 
-# Thermal state (if high, ResourceGovernor may block contribution)
-# Check in System Information > Hardware > Thermal
+# Thermal state
+# Check in System Information > Hardware
 
 # Idle time (ResourceGovernor requires idle > threshold)
 ioreg -c IOHIDSystem | grep HIDIdleTime
@@ -84,7 +92,10 @@ ioreg -c IOHIDSystem | grep HIDIdleTime
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | "kwaainet not found" | Not in PATH or bundle | Install kwaainet or check PATH |
-| Health check times out | Daemon still starting | Wait longer; first run downloads models |
-| Chat returns 404 | API server not started | Check if port 8000 is listening |
+| "Model not found" | No local model available | `ollama pull llama3.1:8b` |
+| API returns nothing | Model still loading (~12s) | Wait longer; check logs |
+| Daemon starts but no API | `kwaainet serve` not started | Fallow starts both; check logs |
 | Governor blocks contribution | System not idle, on battery, or thermal | Check SettingsView conditions |
 | Credits not accruing | Onboarding not completed | Complete the consent flow first |
+| Port conflict on 8080 | Another service using p2pd port | Stop conflicting service |
+| Port conflict on 11435 | Another kwaainet serve instance | `kill` the old process |

@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - macOS menu bar app with status indicator (green/red dot)
-- KwaaiNet binary lifecycle management (start, stop, health check with 30s startup polling)
+- KwaaiNet two-service management: P2P daemon (port 8080) and API server (port 11435)
 - Binary code signature verification before launching kwaainet (SecStaticCode, Release builds)
-- Port conflict detection (checks 8080 and 8000 before starting, identifies conflicting process)
+- Port conflict detection (checks 8080 and 11435 before starting)
 - Localhost API auth tokens (32-byte random token, passed as env var, included in HTTP headers)
-- Automated first-run setup detection (checks for ~/.kwaainet/identity.key, runs kwaainet setup)
+- Automated first-run setup detection (checks for ~/.kwaainet/config.yaml, runs kwaainet setup)
 - ResourceGovernor v1: idle threshold, charging gate, Low Power Mode gate, thermal gate, quiet hours
 - First-run onboarding with consent screen (gates governor and credit accrual until consent)
 - Local chat UI with SSE streaming, cancel support, auto-scroll during token streaming
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Testability protocols: SystemMonitoring, IdleDetecting (enable mock injection)
 - Xcode project targeting macOS 14.0+, Swift 6.0 strict concurrency
 - Shared Xcode scheme for CI and contributor onboarding
-- Package.swift with FallowCore library target + test target
+- Package.swift with FallowCore library + Fallow executable + FallowTests (apple/swift-testing)
 - GitHub Actions CI: SPM build, Xcode build, tests
 - Release workflow with DMG creation (signing/notarisation ready when secrets configured)
 - `scripts/build-dmg.sh` for local DMG builds (unsigned, signed, or notarised)

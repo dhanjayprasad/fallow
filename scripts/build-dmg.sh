@@ -84,7 +84,7 @@ if $SIGN; then
 
     echo "==> Signing Fallow.app"
     codesign --force --deep --sign "$CERT_NAME" \
-        --entitlements "$PROJECT_DIR/Fallow/Fallow/Fallow.entitlements" \
+        --entitlements "$PROJECT_DIR/Fallow/Fallow/FallowRelease.entitlements" \
         --options runtime \
         --timestamp \
         "$APP_PATH"

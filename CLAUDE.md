@@ -12,7 +12,7 @@ Fallow is a native macOS menu bar app that contributes idle compute to a distrib
 
 These decisions survived three rounds of architectural review and two rounds of external critique. They are final unless new evidence emerges:
 
-- **Build on KwaaiNet, not from scratch.** KwaaiNet (MIT licensed, Rust-native, v0.3.49) already ships distributed shard inference, Petals DHT compatibility, Metal GPU acceleration, OpenAI-compatible API, daemon mode, and cross-platform binaries. Rebuilding this would be months of duplicated effort.
+- **Build on KwaaiNet, not from scratch.** KwaaiNet (MIT licensed, Rust-native, tested against v0.4.1) already ships distributed shard inference, Petals DHT compatibility, Metal GPU acceleration, OpenAI-compatible API, daemon mode, and cross-platform binaries. Rebuilding this would be months of duplicated effort.
 - **Swift/SwiftUI for the macOS app shell.** Native, no Electron, no embedded Python.
 - **KwaaiNet binary as a supervised subprocess.** Communicate via its local API and CLI, not deep FFI. Pin to a specific tested version. Disable its self-update inside the bundle.
 - **Centralised coordination node for v0.1.** Honest framing: peer-to-peer data plane, centrally coordinated control plane. Decentralise later.
@@ -54,7 +54,7 @@ These decisions survived three rounds of architectural review and two rounds of 
 - **No em dashes or en dashes** in any generated text, comments, or documentation. Use commas, semicolons, colons, or rewrite the sentence instead. This is a hard rule.
 - **NZ English spelling** throughout (organisation, behaviour, colour, etc.)
 - **Architecture:** Menu bar app (LSUIElement = true). Separate process for KwaaiNet binary, not in-process.
-- **Communication with KwaaiNet:** Via its local HTTP API (default port 8080 for node health, port 8000 for OpenAI-compatible API) and CLI for lifecycle management.
+- **Communication with KwaaiNet:** Two services: P2P daemon (`kwaainet start --daemon`, port 8080 via p2pd) and local API server (`kwaainet serve --port 11435`). Daemon health via `kwaainet status` CLI; API health via `/v1/models` on port 11435.
 - **Error handling:** Never crash silently. Log all errors via OSLog. Surface user-facing errors in the menu bar status.
 - **Dependencies:** Minimise third-party Swift packages. Prefer Foundation, AppKit, SwiftUI, Network.framework, ServiceManagement, OSLog.
 
@@ -66,17 +66,22 @@ fallow/
     Fallow.xcodeproj/              -- Xcode project file
     Package.swift                  -- SPM manifest (CLI build verification)
     Fallow/                        -- Source root
-      FallowApp.swift              -- Entry point, MenuBarExtra + Window scenes
+      Entry/
+        FallowApp.swift            -- @main entry point, MenuBarExtra + Window scenes
       Info.plist                   -- LSUIElement = true
-      Fallow.entitlements          -- App entitlements
+      Fallow.entitlements          -- Debug entitlements (no sandbox)
+      FallowRelease.entitlements   -- Release entitlements (sandboxed)
       Core/
         Logging.swift              -- OSLog subsystem definitions
         ProcessRunner.swift        -- Async subprocess execution
-        KwaaiNetManager.swift      -- Binary lifecycle (start/stop/health)
+        KwaaiNetManager.swift      -- Binary lifecycle (two services: daemon + API)
         SystemMonitor.swift        -- Power, thermal, Low Power Mode (IOKit)
         IdleDetector.swift         -- HID idle time (IOKit)
         ResourceGovernor.swift     -- Policy engine
         CreditLedger.swift         -- Local credit tracking
+        PortChecker.swift          -- Port conflict detection
+        AuthTokenManager.swift     -- Session auth token generation
+        BinaryVerifier.swift       -- Code signature verification
       ViewModels/
         AppState.swift             -- Central state coordinator
       Views/
@@ -85,7 +90,8 @@ fallow/
         ChatView.swift             -- SSE streaming chat
         SettingsView.swift         -- Governor configuration
       Resources/
-        Assets.xcassets/           -- App icon assets
+        Assets.xcassets/           -- App icon assets (10 programmatic PNGs)
+    Tests/FallowTests/             -- Unit tests (swift-testing)
   scripts/
     build-dmg.sh                   -- Build, sign, and notarise a DMG
   .claude/

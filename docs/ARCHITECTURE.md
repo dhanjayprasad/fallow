@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fallow is a native macOS menu bar app that supervises a bundled [KwaaiNet](https://github.com/Kwaai-AI-Lab/KwaaiNet) binary. Fallow owns the product layer (UX, governance, credits, consent). KwaaiNet owns the infrastructure layer (distributed inference, peer networking, model serving).
+Fallow is a native macOS menu bar app that supervises a bundled [KwaaiNet](https://github.com/Kwaai-AI-Lab/KwaaiNet) binary (tested against v0.4.1). Fallow owns the product layer (UX, governance, credits, consent). KwaaiNet owns the infrastructure layer (distributed inference, peer networking, model serving).
 
 ## Layer Diagram
 
@@ -18,10 +18,13 @@ Fallow is a native macOS menu bar app that supervises a bundled [KwaaiNet](https
 |  Core                                          |
 |  KwaaiNetManager  ResourceGovernor             |
 |  SystemMonitor    IdleDetector                 |
-|  CreditLedger     ProcessRunner    Logging     |
+|  CreditLedger     ProcessRunner                |
+|  PortChecker      AuthTokenManager             |
+|  BinaryVerifier   Logging                      |
 +-----------------------------------------------+
-|  KwaaiNet Binary (subprocess)                  |
-|  kwaainet CLI + daemon + OpenAI-compatible API |
+|  KwaaiNet (two supervised processes)           |
+|  kwaainet start --daemon (P2P, port 8080)      |
+|  kwaainet serve --port 11435 (local API)       |
 +-----------------------------------------------+
 ```
 
@@ -30,19 +33,24 @@ Fallow is a native macOS menu bar app that supervises a bundled [KwaaiNet](https
 ```
 Fallow/
   Fallow.xcodeproj/       Xcode project (primary build system)
-  Package.swift            SPM manifest (CLI build verification)
+  Package.swift            SPM: FallowCore (lib) + Fallow (exe) + FallowTests
   Fallow/
-    FallowApp.swift        Entry point, MenuBarExtra + Window scenes
+    Entry/
+      FallowApp.swift      @main entry point, MenuBarExtra + Window scenes
     Info.plist              LSUIElement = true (menu bar only)
-    Fallow.entitlements     Minimal for v0.1
+    Fallow.entitlements     Debug entitlements (no sandbox)
+    FallowRelease.entitlements  Release entitlements (sandboxed)
     Core/
       Logging.swift         OSLog subsystem and category definitions
       ProcessRunner.swift   Async subprocess execution via Task.detached
-      KwaaiNetManager.swift Binary lifecycle (start/stop/health/model)
+      KwaaiNetManager.swift Two-service lifecycle (daemon + API server)
       SystemMonitor.swift   Power source (IOKit), thermal, Low Power Mode
       IdleDetector.swift    HID idle time via IOKit registry
-      ResourceGovernor.swift Policy engine combining monitor + detector
-      CreditLedger.swift    Local credit tracking with UserDefaults persistence
+      ResourceGovernor.swift Policy engine (protocols: SystemMonitoring, IdleDetecting)
+      CreditLedger.swift    Local credit tracking (injectable UserDefaults)
+      PortChecker.swift     POSIX socket port conflict detection
+      AuthTokenManager.swift Session auth token generation (SecRandomCopyBytes)
+      BinaryVerifier.swift  Code signature verification (SecStaticCode)
     ViewModels/
       AppState.swift        Central state coordinator, governor loop
     Views/
@@ -51,27 +59,32 @@ Fallow/
       ChatView.swift        SSE streaming chat against localhost API
       SettingsView.swift    Governor configuration form
     Resources/
-      Assets.xcassets/      App icon assets
+      Assets.xcassets/      App icon assets (10 programmatic PNGs)
+  Tests/FallowTests/        Unit tests (apple/swift-testing framework)
 ```
 
 ## Key Design Decisions
 
 **All observable classes are @MainActor.** This ensures thread safety under Swift 6 strict concurrency. ProcessRunner uses `Task.detached` to avoid blocking the main actor during subprocess execution.
 
-**KwaaiNet is supervised, not embedded.** Fallow communicates with KwaaiNet via its local HTTP API (ports 8080 and 8000) and CLI for lifecycle management. No FFI, no in-process linking. If KwaaiNet changes its API surface, only KwaaiNetManager needs updating.
+**KwaaiNet runs as two supervised processes.** The P2P daemon (`kwaainet start --daemon`) handles network contribution on port 8080 via p2pd. The API server (`kwaainet serve --port 11435`) provides the local OpenAI-compatible interface for chat. Daemon health is checked via the `kwaainet status` CLI; API health via `GET /v1/models`.
 
-**ResourceGovernor is a pure policy engine.** It reads state from SystemMonitor and IdleDetector, evaluates a set of gates (idle, charging, thermal, quiet hours), and reports whether contribution should proceed. It does not directly start or stop the daemon; AppState's governor loop acts on its recommendations.
+**ResourceGovernor is a pure policy engine.** It reads state from SystemMonitoring and IdleDetecting protocols (enabling mock injection for tests), evaluates a set of gates (idle, charging, thermal, quiet hours), and reports whether contribution should proceed. AppState's governor loop acts on its recommendations.
 
-**Credit economy is app-local for v0.1.** CreditLedger tracks earned and spent credits in UserDefaults. This is a local fiction to validate the UX; a real server-backed ledger is planned for v0.2.
+**Credit economy is app-local for v0.1.** CreditLedger tracks earned and spent credits in UserDefaults (injectable for test isolation). This is a local fiction to validate the UX; a real server-backed ledger is planned for v0.2.
+
+**Package access for testability.** All Core and ViewModel types use `package` access, enabling the FallowTests target to import FallowCore with `@testable import`.
 
 ## Communication with KwaaiNet
 
-| Purpose | Protocol | Endpoint |
-|---------|----------|----------|
-| Node health | HTTP GET | `localhost:8080/health` |
-| Model discovery | HTTP GET | `localhost:8000/v1/models` |
-| Chat completions | HTTP POST (SSE) | `localhost:8000/v1/chat/completions` |
-| Start daemon | CLI | `kwaainet start --daemon` |
-| Stop daemon | CLI | `kwaainet stop` |
+| Purpose | Method | Details |
+|---------|--------|---------|
+| Start P2P daemon | CLI | `kwaainet start --daemon` (port 8080 via p2pd) |
+| Stop P2P daemon | CLI | `kwaainet stop` |
+| Daemon health | CLI | `kwaainet status` (parse for "Running") |
+| Start API server | Process | `kwaainet serve --port 11435` (long-running) |
+| Model discovery | HTTP GET | `localhost:11435/v1/models` |
+| Chat completions | HTTP POST (SSE) | `localhost:11435/v1/chat/completions` |
+| First-run setup | CLI | `kwaainet setup` (if `~/.kwaainet/config.yaml` missing) |
 
 See [KWAAINET_INTEGRATION.md](KWAAINET_INTEGRATION.md) for detailed integration notes.

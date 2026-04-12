@@ -17,17 +17,17 @@
    ```
    /agents
    ```
-   You should see: architect, product-critic, security-reviewer, swift-expert
+   You should see: architect, product-critic, security-reviewer, swift-expert, ux-reviewer
 
 ## Daily Workflow
 
-### Starting the Weekend Prototype
+### Getting Oriented
 
 ```
-/weekend-prototype
+/quick-start
 ```
 
-This walks you through the minimal proof-of-concept build.
+This gives you a codebase tour and shows what to work on next.
 
 ### Writing New Code
 
