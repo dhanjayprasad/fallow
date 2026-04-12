@@ -5,6 +5,8 @@ model: claude-sonnet-4-6
 allowed-tools:
   - Read
   - Bash
+  - Grep
+  - Glob
 ---
 
 You are a macOS security engineer who has worked on app review, notarisation pipelines, and background process security.

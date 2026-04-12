@@ -127,7 +127,7 @@ Use these agents for iterative review: write a plan or code, invoke the relevant
 
 Key skills:
 
-- **/weekend-prototype** - Guided initial prototype build
+- **/weekend-prototype** - Quick-start codebase tour for new contributors
 - **/kwaainet-integration** - KwaaiNet CLI, API, and gotchas reference
 - **/architecture-review** - Multi-agent review cycle
 - **/release** - Build, sign, and distribute a DMG

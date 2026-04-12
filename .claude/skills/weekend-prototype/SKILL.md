@@ -1,97 +1,77 @@
 ---
 name: weekend-prototype
-description: Guide for building the minimal Fallow prototype in a single weekend. Use when starting the initial build or when scope creep threatens to delay the first working version.
+description: Quick-start guide for understanding the Fallow codebase. Use when onboarding a new contributor or when you need to orient yourself in the project.
 ---
 
-# Weekend Prototype Skill
+# Quick Start Guide
 
-Build the thinnest possible working Fallow prototype. This is the "proof of concept before committing" build.
+Fallow is a macOS menu bar app that supervises a KwaaiNet binary. The prototype is built. This skill helps you understand what exists and where to go next.
 
-## Goal
+## Codebase Tour (read in this order)
 
-A macOS menu bar app that:
-1. Shows a status icon (green dot = KwaaiNet running, red dot = stopped)
-2. Has a "Start Contributing" / "Stop Contributing" toggle
-3. Launches `kwaainet start --daemon` as a supervised subprocess
-4. Stops it gracefully with `kwaainet stop`
-5. Shows basic status from `kwaainet status` output
+### 1. Entry point
+`Fallow/Fallow/FallowApp.swift` -- MenuBarExtra with .window style, plus Window scenes for Chat and Settings.
 
-That is ALL. No credits, no chat UI, no governor, no onboarding. Just prove the integration works.
+### 2. Central state
+`Fallow/Fallow/ViewModels/AppState.swift` -- Owns all subsystems. Governor loop auto-starts/stops KwaaiNet based on system conditions. Read this to understand the coordination model.
 
-## Steps
+### 3. KwaaiNet integration
+`Fallow/Fallow/Core/KwaaiNetManager.swift` -- Start/stop daemon via CLI, health checks via HTTP, model discovery via `/v1/models`. This is the integration seam.
 
-### Step 1: Get KwaaiNet Running Manually
+### 4. Policy engine
+`Fallow/Fallow/Core/ResourceGovernor.swift` -- Evaluates gates: idle, charging, thermal, Low Power Mode, quiet hours. Pure logic, no side effects.
+
+### 5. System monitoring
+- `Fallow/Fallow/Core/SystemMonitor.swift` -- IOKit power source, ProcessInfo thermal state
+- `Fallow/Fallow/Core/IdleDetector.swift` -- IOKit HID idle time
+
+### 6. Views
+- `StatusMenuView.swift` -- Main popover (status, controls, stats, navigation)
+- `OnboardingView.swift` -- First-run consent
+- `ChatView.swift` -- SSE streaming chat against KwaaiNet API
+- `SettingsView.swift` -- Governor configuration
+
+### 7. Reference docs
+- `docs/ARCHITECTURE.md` -- Layer diagram and design decisions
+- `docs/KWAAINET_INTEGRATION.md` -- CLI, API, and known gotchas
+
+## Build and Run
 
 ```bash
-# Download the macOS binary
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Kwaai-AI-Lab/KwaaiNet/releases/latest/download/kwaainet-installer.sh | sh
+# CLI build (no Xcode required)
+cd Fallow && swift build
 
-# Run setup
-kwaainet setup
-
-# Run benchmark
-kwaainet benchmark
-
-# Start daemon
-kwaainet start --daemon
-
-# Verify it is running
-kwaainet status
-
-# Verify local API responds
-curl http://localhost:8080/health
-
-# Stop it
-kwaainet stop
+# Xcode build
+open Fallow/Fallow.xcodeproj
+# Cmd+B to build, Cmd+R to run
+# App appears in menu bar (no Dock icon)
 ```
 
-Document: what worked, what broke, how long model download took, what the status output format looks like. This is your integration contract.
+## Test with KwaaiNet
 
-### Step 2: Create Minimal Xcode Project
+```bash
+# Install KwaaiNet
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Kwaai-AI-Lab/KwaaiNet/releases/latest/download/kwaainet-installer.sh | sh
+kwaainet setup
 
-- macOS App, SwiftUI lifecycle
-- Set LSUIElement = true in Info.plist (menu bar only, no dock icon)
-- Use MenuBarExtra for the menu bar presence
-- Target macOS 14.0+
+# Verify it works
+kwaainet start --daemon
+curl http://localhost:8080/health
+kwaainet stop
 
-### Step 3: Implement KwaaiNetManager
+# Now run Fallow and click "Start Contributing"
+```
 
-A single class that wraps Process/subprocess management:
-- `start()`: runs `kwaainet start --daemon`
-- `stop()`: runs `kwaainet stop`
-- `status()`: runs `kwaainet status`, parses output
-- `isRunning`: published boolean
+If something breaks, run `/debug-kwaainet` for systematic troubleshooting.
 
-### Step 4: Wire Up the Menu Bar
+## What to Work On Next
 
-- Green/red SF Symbol based on `isRunning`
-- Toggle button: Start/Stop
-- Status text showing model name and connection count
-- Quit button
+Check the GitHub issues and milestone v0.1.0. Key areas:
 
-### Step 5: Test
+1. **Test with real KwaaiNet** (issue #1) -- validate the integration contract
+2. **First-run setup flow** -- `kwaainet setup` is not yet automated
+3. **Port conflict detection** -- ports 8080/8000 are hardcoded
+4. **App sandbox** -- currently unsandboxed, needs entitlements work
+5. **Code signing** -- configure Developer ID for DMG distribution
 
-- Launch the app
-- Click Start, verify kwaainet daemon starts
-- Verify green dot appears
-- Click Stop, verify clean shutdown
-- Quit the app, verify kwaainet is also stopped
-- Launch the app with kwaainet already running, verify it detects existing daemon
-
-## What You Learn
-
-- Whether kwaainet behaves well as a supervised process
-- How long cold start takes (model download)
-- What the API surface actually looks like in practice
-- Whether the integration seam is clean enough to build on
-- Whether this is fun to work on (important for a side project)
-
-## What You Do NOT Build
-
-- ResourceGovernor (no idle detection yet)
-- Credit system
-- Chat UI
-- Onboarding/consent screens
-- Telemetry
-- Code signing/notarisation
-- Anything involving networking configuration
+To add a feature, run `/add-feature` for a step-by-step guide.

@@ -5,7 +5,8 @@ model: claude-sonnet-4-6
 allowed-tools:
   - Read
   - Bash
-  - Write
+  - Grep
+  - Glob
 ---
 
 You are a senior distributed systems architect reviewing the Fallow project.
