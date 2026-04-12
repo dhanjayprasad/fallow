@@ -6,23 +6,40 @@ import Foundation
 import OSLog
 
 /// Information about the running KwaaiNet node.
-struct KwaaiNetStatus: Sendable {
-    var isRunning: Bool = false
-    var modelName: String?
-    var connectionCount: Int?
+package struct KwaaiNetStatus: Sendable {
+    package var isRunning: Bool = false
+    package var modelName: String?
+    package var connectionCount: Int?
+
+    package init(isRunning: Bool = false, modelName: String? = nil, connectionCount: Int? = nil) {
+        self.isRunning = isRunning
+        self.modelName = modelName
+        self.connectionCount = connectionCount
+    }
+}
+
+/// State of the first-run setup process.
+package enum SetupState: Sendable, Equatable {
+    case notNeeded
+    case checking
+    case running(String)
+    case completed
+    case failed(String)
 }
 
 @MainActor
 @Observable
-final class KwaaiNetManager {
+package final class KwaaiNetManager {
 
-    private(set) var status = KwaaiNetStatus()
-    private(set) var isTransitioning = false
-    private(set) var lastError: String?
+    package private(set) var status = KwaaiNetStatus()
+    package private(set) var isTransitioning = false
+    package private(set) var lastError: String?
+    package private(set) var setupState: SetupState = .notNeeded
+    package private(set) var currentAuthToken: String?
 
     private var healthCheckTask: Task<Void, Never>?
 
-    /// URLSession with a short timeout for health checks.
+    /// URLSession with a short timeout for health checks and model discovery.
     private static let healthSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 5
@@ -30,14 +47,13 @@ final class KwaaiNetManager {
     }()
 
     /// Locates the kwaainet binary in the app bundle or system PATH.
-    var binaryPath: String? {
+    package var binaryPath: String? {
         if let bundlePath = Bundle.main.url(
             forAuxiliaryExecutable: "kwaainet"
         )?.path {
             return bundlePath
         }
         #if DEBUG
-        // Fall back to system PATH only in debug builds for development
         return ProcessRunner.findInPath("kwaainet")
         #else
         Logger.kwaainet.error("kwaainet binary not found in app bundle")
@@ -45,8 +61,8 @@ final class KwaaiNetManager {
         #endif
     }
 
-    /// Starts the KwaaiNet daemon.
-    func start() async {
+    /// Starts the KwaaiNet daemon with full pre-flight checks.
+    package func start() async {
         guard !isTransitioning else { return }
         guard let binary = binaryPath else {
             lastError = "kwaainet binary not found"
@@ -58,10 +74,70 @@ final class KwaaiNetManager {
         lastError = nil
         Logger.kwaainet.info("Starting kwaainet daemon")
 
+        // 1. Verify binary code signature (Release builds only)
+        let verification = BinaryVerifier.verify(binaryPath: binary)
+        if case .invalid(let reason) = verification {
+            lastError = "Binary signature invalid: \(reason)"
+            Logger.security.error("Refusing to launch unsigned binary: \(reason)")
+            isTransitioning = false
+            return
+        }
+
+        // 2. Check port availability
+        let conflicts = PortChecker.checkKwaaiNetPorts()
+        if !conflicts.isEmpty {
+            let desc = conflicts.map { conflict in
+                "Port \(conflict.port)\(conflict.processName.map { " (used by \($0))" } ?? "")"
+            }.joined(separator: ", ")
+            lastError = "\(desc) already in use. KwaaiNet cannot start."
+            Logger.network.error("Port conflicts detected: \(desc)")
+            isTransitioning = false
+            return
+        }
+
+        // 3. First-run setup detection
+        if needsSetup() {
+            setupState = .running("Setting up KwaaiNet identity and dependencies...")
+            Logger.kwaainet.info("First-run setup needed, running kwaainet setup")
+
+            do {
+                let setupResult = try await ProcessRunner.run(
+                    executablePath: binary,
+                    arguments: ["setup"]
+                )
+                if !setupResult.succeeded {
+                    let err = setupResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    setupState = .failed(err)
+                    lastError = "KwaaiNet setup failed: \(err)"
+                    Logger.kwaainet.error("kwaainet setup failed: \(err)")
+                    isTransitioning = false
+                    return
+                }
+                setupState = .completed
+                Logger.kwaainet.info("kwaainet setup completed successfully")
+            } catch {
+                setupState = .failed(error.localizedDescription)
+                lastError = "KwaaiNet setup failed: \(error.localizedDescription)"
+                isTransitioning = false
+                return
+            }
+        }
+
+        // 4. Generate auth token for this session
+        currentAuthToken = AuthTokenManager.generateToken()
+        Logger.kwaainet.info("Generated auth token for daemon session")
+
+        // 5. Launch the daemon with auth token in environment
         do {
+            var env: [String: String] = [:]
+            if let token = currentAuthToken {
+                env[AuthTokenManager.envVarName] = token
+            }
+
             let result = try await ProcessRunner.run(
                 executablePath: binary,
-                arguments: ["start", "--daemon"]
+                arguments: ["start", "--daemon"],
+                environment: env.isEmpty ? nil : env
             )
 
             if !result.succeeded {
@@ -71,7 +147,7 @@ final class KwaaiNetManager {
                 return
             }
 
-            // Wait for daemon to become ready (may take longer on first run)
+            // 6. Wait for daemon to become ready
             let ready = await waitForHealth(timeoutSeconds: 30)
             if !ready {
                 lastError = "KwaaiNet daemon did not become ready in time"
@@ -90,7 +166,7 @@ final class KwaaiNetManager {
     }
 
     /// Stops the KwaaiNet daemon gracefully.
-    func stop() async {
+    package func stop() async {
         guard !isTransitioning else { return }
         guard let binary = binaryPath else { return }
 
@@ -116,15 +192,18 @@ final class KwaaiNetManager {
             lastError = error.localizedDescription
         }
 
+        currentAuthToken = nil
         isTransitioning = false
     }
 
     /// Queries the KwaaiNet health endpoint and updates status.
-    func refreshStatus() async {
-        guard let healthURL = URL(string: "http://localhost:8080/health") else { return }
+    package func refreshStatus() async {
+        guard let request = authenticatedRequest(
+            url: "http://localhost:8080/health"
+        ) else { return }
 
         do {
-            let (_, response) = try await Self.healthSession.data(from: healthURL)
+            let (_, response) = try await Self.healthSession.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                httpResponse.statusCode == 200 {
                 status.isRunning = true
@@ -139,7 +218,7 @@ final class KwaaiNetManager {
     }
 
     /// Begins periodic health polling. Call when attaching to an existing daemon.
-    func startHealthPolling() {
+    package func startHealthPolling() {
         stopHealthPolling()
         healthCheckTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -152,13 +231,36 @@ final class KwaaiNetManager {
 
     // MARK: - Private
 
+    /// Creates a URLRequest with the current auth token header.
+    private func authenticatedRequest(url: String) -> URLRequest? {
+        guard let url = URL(string: url) else { return nil }
+        var request = URLRequest(url: url)
+        if let token = currentAuthToken {
+            AuthTokenManager.applyToken(token, to: &request)
+        }
+        return request
+    }
+
+    /// Checks whether kwaainet first-run setup is needed.
+    private func needsSetup() -> Bool {
+        let identityPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".kwaainet/identity.key").path
+        let exists = FileManager.default.fileExists(atPath: identityPath)
+        if !exists {
+            Logger.kwaainet.info("KwaaiNet identity key not found at \(identityPath)")
+        }
+        return !exists
+    }
+
     /// Polls the health endpoint until it responds or the timeout expires.
     private func waitForHealth(timeoutSeconds: Int) async -> Bool {
         for _ in 0..<timeoutSeconds {
             try? await Task.sleep(for: .seconds(1))
-            guard let healthURL = URL(string: "http://localhost:8080/health") else { return false }
+            guard let request = authenticatedRequest(
+                url: "http://localhost:8080/health"
+            ) else { return false }
             do {
-                let (_, response) = try await Self.healthSession.data(from: healthURL)
+                let (_, response) = try await Self.healthSession.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                     return true
                 }
@@ -170,10 +272,12 @@ final class KwaaiNetManager {
     }
 
     private func fetchModelInfo() async {
-        guard let modelsURL = URL(string: "http://localhost:8000/v1/models") else { return }
+        guard let request = authenticatedRequest(
+            url: "http://localhost:8000/v1/models"
+        ) else { return }
 
         do {
-            let (data, _) = try await Self.healthSession.data(from: modelsURL)
+            let (data, _) = try await Self.healthSession.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let models = json["data"] as? [[String: Any]],
                let firstModel = models.first,

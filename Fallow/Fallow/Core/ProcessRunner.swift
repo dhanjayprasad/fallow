@@ -20,9 +20,11 @@ enum ProcessRunner {
     /// Executes on a detached task to avoid blocking the caller's actor.
     static func run(
         executablePath: String,
-        arguments: [String] = []
+        arguments: [String] = [],
+        environment: [String: String]? = nil
     ) async throws -> ProcessResult {
-        try await Task.detached {
+        let env = environment
+        return try await Task.detached {
             let process = Process()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
@@ -31,6 +33,12 @@ enum ProcessRunner {
             process.arguments = arguments
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
+
+            if let env {
+                var merged = ProcessInfo.processInfo.environment
+                merged.merge(env) { _, new in new }
+                process.environment = merged
+            }
 
             try process.run()
 

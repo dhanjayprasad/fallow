@@ -4,11 +4,15 @@
 
 import SwiftUI
 
-struct StatusMenuView: View {
-    @Bindable var appState: AppState
+package struct StatusMenuView: View {
+    @Bindable package var appState: AppState
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
+    package init(appState: AppState) {
+        self.appState = appState
+    }
+
+    package var body: some View {
         if !appState.hasCompletedOnboarding {
             OnboardingView(appState: appState)
         } else {
@@ -26,6 +30,23 @@ struct StatusMenuView: View {
                 Text(appState.statusText)
                     .font(.headline)
                 Spacer()
+            }
+
+            // Setup progress indicator
+            if case .running(let message) = appState.kwaaiNetManager.setupState {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if case .failed(let reason) = appState.kwaaiNetManager.setupState {
+                Text("Setup failed: \(reason)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
             if let error = appState.kwaaiNetManager.lastError {

@@ -4,10 +4,14 @@
 
 import SwiftUI
 
-struct OnboardingView: View {
-    @Bindable var appState: AppState
+package struct OnboardingView: View {
+    @Bindable package var appState: AppState
 
-    var body: some View {
+    package init(appState: AppState) {
+        self.appState = appState
+    }
+
+    package var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 48))

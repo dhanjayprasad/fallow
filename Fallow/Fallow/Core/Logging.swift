@@ -19,6 +19,12 @@ extension Logger {
     /// Logs related to the chat interface and API calls.
     static let chat = Logger(subsystem: subsystem, category: "chat")
 
+    /// Logs related to binary and code signature verification.
+    static let security = Logger(subsystem: subsystem, category: "security")
+
+    /// Logs related to port detection and network checks.
+    static let network = Logger(subsystem: subsystem, category: "network")
+
     /// General app lifecycle logs.
     static let app = Logger(subsystem: subsystem, category: "app")
 }

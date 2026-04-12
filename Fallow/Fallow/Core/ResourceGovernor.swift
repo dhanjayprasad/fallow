@@ -6,7 +6,7 @@ import Foundation
 import OSLog
 
 /// The reason the ResourceGovernor is blocking or allowing contribution.
-enum GovernorReason: String, Sendable {
+package enum GovernorReason: String, Sendable {
     case allowed = "All conditions met"
     case userNotIdle = "Waiting for user to be idle"
     case onBattery = "Paused: running on battery"
@@ -17,27 +17,41 @@ enum GovernorReason: String, Sendable {
 }
 
 /// Persisted governor settings.
-struct GovernorSettings: Codable, Sendable {
-    var requireCharging: Bool = true
-    var idleThresholdMinutes: Int = 5
-    var quietHoursEnabled: Bool = false
-    var quietHoursStart: Int = 23
-    var quietHoursEnd: Int = 7
+package struct GovernorSettings: Codable, Sendable {
+    package var requireCharging: Bool = true
+    package var idleThresholdMinutes: Int = 5
+    package var quietHoursEnabled: Bool = false
+    package var quietHoursStart: Int = 23
+    package var quietHoursEnd: Int = 7
 
-    static let defaultSettings = GovernorSettings()
+    package static let defaultSettings = GovernorSettings()
+
+    package init(
+        requireCharging: Bool = true,
+        idleThresholdMinutes: Int = 5,
+        quietHoursEnabled: Bool = false,
+        quietHoursStart: Int = 23,
+        quietHoursEnd: Int = 7
+    ) {
+        self.requireCharging = requireCharging
+        self.idleThresholdMinutes = idleThresholdMinutes
+        self.quietHoursEnabled = quietHoursEnabled
+        self.quietHoursStart = quietHoursStart
+        self.quietHoursEnd = quietHoursEnd
+    }
 }
 
 @MainActor
 @Observable
-final class ResourceGovernor {
+package final class ResourceGovernor {
 
-    let systemMonitor: SystemMonitor
-    let idleDetector: IdleDetector
+    let systemMonitor: any SystemMonitoring
+    let idleDetector: any IdleDetecting
 
-    private(set) var reason: GovernorReason = .userNotIdle
-    var isManuallyPaused: Bool = false
+    package private(set) var reason: GovernorReason = .userNotIdle
+    package var isManuallyPaused: Bool = false
 
-    var settings: GovernorSettings {
+    package var settings: GovernorSettings {
         didSet {
             persistSettings()
             idleDetector.idleThreshold = TimeInterval(settings.idleThresholdMinutes * 60)
@@ -45,11 +59,11 @@ final class ResourceGovernor {
     }
 
     /// Whether all conditions are met for contribution.
-    var shouldContribute: Bool {
+    package var shouldContribute: Bool {
         evaluate().shouldContribute
     }
 
-    init(systemMonitor: SystemMonitor, idleDetector: IdleDetector) {
+    package init(systemMonitor: any SystemMonitoring, idleDetector: any IdleDetecting) {
         self.systemMonitor = systemMonitor
         self.idleDetector = idleDetector
         self.settings = Self.loadSettings()
@@ -58,7 +72,7 @@ final class ResourceGovernor {
 
     /// Evaluates all gates and returns whether contribution should proceed.
     @discardableResult
-    func evaluate() -> (shouldContribute: Bool, reason: GovernorReason) {
+    package func evaluate() -> (shouldContribute: Bool, reason: GovernorReason) {
         if isManuallyPaused {
             reason = .manuallyPaused
             return (false, reason)

@@ -7,27 +7,27 @@ import OSLog
 
 @MainActor
 @Observable
-final class AppState {
+package final class AppState {
 
-    let kwaaiNetManager: KwaaiNetManager
-    let systemMonitor: SystemMonitor
-    let idleDetector: IdleDetector
-    let creditLedger: CreditLedger
-    let resourceGovernor: ResourceGovernor
+    package let kwaaiNetManager: KwaaiNetManager
+    package let systemMonitor: SystemMonitor
+    package let idleDetector: IdleDetector
+    package let creditLedger: CreditLedger
+    package let resourceGovernor: ResourceGovernor
 
     /// Whether auto-contribution mode is enabled.
-    var autoContribute: Bool = true {
+    package var autoContribute: Bool = true {
         didSet { evaluateContribution() }
     }
 
     /// Whether the user has completed the onboarding consent flow.
-    var hasCompletedOnboarding: Bool {
+    package var hasCompletedOnboarding: Bool {
         get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
         set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
     }
 
     /// SF Symbol name for the menu bar icon.
-    var menuBarIcon: String {
+    package var menuBarIcon: String {
         if kwaaiNetManager.isTransitioning {
             return "arrow.triangle.2.circlepath"
         }
@@ -35,13 +35,13 @@ final class AppState {
     }
 
     /// Colour for the menu bar icon.
-    var menuBarColour: Color {
+    package var menuBarColour: Color {
         if kwaaiNetManager.isTransitioning { return .orange }
         return kwaaiNetManager.status.isRunning ? .green : .secondary
     }
 
     /// Human-readable status string.
-    var statusText: String {
+    package var statusText: String {
         if kwaaiNetManager.isTransitioning { return "Starting..." }
         if !kwaaiNetManager.status.isRunning { return "Stopped" }
         if let model = kwaaiNetManager.status.modelName {
@@ -51,7 +51,7 @@ final class AppState {
     }
 
     /// Formatted contribution time.
-    var contributionTimeFormatted: String {
+    package var contributionTimeFormatted: String {
         let total = creditLedger.totalContributionSeconds
         let hours = Int(total) / 3600
         let minutes = (Int(total) % 3600) / 60
@@ -64,7 +64,7 @@ final class AppState {
     private var governorTask: Task<Void, Never>?
     private var hasPerformedSetup = false
 
-    init() {
+    package init() {
         let manager = KwaaiNetManager()
         let monitor = SystemMonitor()
         let detector = IdleDetector()
@@ -83,7 +83,7 @@ final class AppState {
     }
 
     /// Called once from the view layer to kick off async setup.
-    func initialSetup() async {
+    package func initialSetup() async {
         guard !hasPerformedSetup else { return }
         hasPerformedSetup = true
 
@@ -108,12 +108,12 @@ final class AppState {
     }
 
     /// Called when the user completes onboarding; starts the governor loop.
-    func onOnboardingComplete() {
+    package func onOnboardingComplete() {
         startGovernorLoop()
     }
 
     /// Toggle contribution on or off.
-    func toggleContribution() async {
+    package func toggleContribution() async {
         if kwaaiNetManager.status.isRunning {
             resourceGovernor.isManuallyPaused = true
             creditLedger.stopContribution()

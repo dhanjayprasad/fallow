@@ -6,24 +6,32 @@ import Foundation
 import IOKit
 import OSLog
 
+/// Protocol for idle detection, enabling test doubles.
+@MainActor
+package protocol IdleDetecting: AnyObject {
+    var isIdle: Bool { get }
+    var idleSeconds: TimeInterval { get }
+    var idleThreshold: TimeInterval { get set }
+}
+
 @MainActor
 @Observable
-final class IdleDetector {
+package final class IdleDetector: IdleDetecting {
 
     /// Seconds since the user last interacted with the Mac.
-    private(set) var idleSeconds: TimeInterval = 0
+    package private(set) var idleSeconds: TimeInterval = 0
 
     /// Threshold in seconds to consider the user idle. Default: 5 minutes.
-    var idleThreshold: TimeInterval = 300
+    package var idleThreshold: TimeInterval = 300
 
     /// Whether the user is currently considered idle.
-    var isIdle: Bool {
+    package var isIdle: Bool {
         idleSeconds >= idleThreshold
     }
 
     private var pollingTask: Task<Void, Never>?
 
-    func startDetecting() {
+    package func startDetecting() {
         stopDetecting()
 
         pollingTask = Task { [weak self] in
@@ -36,7 +44,7 @@ final class IdleDetector {
         Logger.governor.info("Idle detection started (threshold: \(self.idleThreshold)s)")
     }
 
-    func stopDetecting() {
+    package func stopDetecting() {
         pollingTask?.cancel()
         pollingTask = nil
     }

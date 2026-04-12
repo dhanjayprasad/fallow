@@ -18,8 +18,13 @@ struct ChatMessage: Identifiable {
     }
 }
 
-struct ChatView: View {
-    var appState: AppState
+package struct ChatView: View {
+    package var appState: AppState
+
+    package init(appState: AppState) {
+        self.appState = appState
+    }
+
     @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var isStreaming = false
@@ -34,7 +39,7 @@ struct ChatView: View {
         return URLSession(configuration: config)
     }()
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
@@ -171,6 +176,9 @@ struct ChatView: View {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if let token = appState.kwaaiNetManager.currentAuthToken {
+                AuthTokenManager.applyToken(token, to: &request)
+            }
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
             let (bytes, response) = try await Self.chatSession.bytes(for: request)
@@ -226,7 +234,7 @@ struct ChatView: View {
 private struct MessageBubble: View {
     let message: ChatMessage
 
-    var body: some View {
+    package var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 60) }
 

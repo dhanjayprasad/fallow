@@ -58,6 +58,20 @@ Content-Type: application/json
 
 SSE frames follow the OpenAI format: `data: {"choices":[{"delta":{"content":"token"}}]}` terminated by `data: [DONE]`.
 
+## Authentication
+
+Fallow generates a random 32-byte hex token on each daemon start and passes it to kwaainet as the `FALLOW_AUTH_TOKEN` environment variable. All HTTP requests from Fallow include this token in the `X-Fallow-Token` header.
+
+KwaaiNet does not currently validate this token server-side. The plumbing is in place for when KwaaiNet adds token validation. The token prevents casual API abuse by other processes on the same machine.
+
+## First-Run Setup
+
+Before starting the daemon, Fallow checks for `~/.kwaainet/identity.key`. If the file does not exist, Fallow runs `kwaainet setup` automatically and shows progress in the menu bar popover. This creates the identity keypair and downloads dependencies.
+
+## Binary Verification
+
+In Release builds, Fallow verifies the kwaainet binary's code signature using `SecStaticCodeCheckValidity` before launching it. If the signature is missing or invalid, the binary is not executed. Debug builds skip this check (development binaries are typically unsigned).
+
 ## Known Gotchas
 
 1. **Self-update must be disabled.** `kwaainet update` would mutate the binary inside a signed app bundle. Fallow manages updates by shipping new DMGs with updated binaries.

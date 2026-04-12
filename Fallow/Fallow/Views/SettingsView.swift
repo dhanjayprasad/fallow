@@ -4,10 +4,14 @@
 
 import SwiftUI
 
-struct SettingsView: View {
-    var appState: AppState
+package struct SettingsView: View {
+    package var appState: AppState
 
-    var body: some View {
+    package init(appState: AppState) {
+        self.appState = appState
+    }
+
+    package var body: some View {
         @Bindable var governor = appState.resourceGovernor
 
         Form {

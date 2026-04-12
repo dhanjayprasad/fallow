@@ -3,6 +3,7 @@
 // Part of Fallow. MIT licence.
 
 import SwiftUI
+import FallowCore
 
 @main
 struct FallowApp: App {

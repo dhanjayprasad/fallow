@@ -7,33 +7,35 @@ import OSLog
 
 @MainActor
 @Observable
-final class CreditLedger {
+package final class CreditLedger {
 
     /// Total credits earned from contributing compute.
-    private(set) var creditsEarned: Double = 0
+    package private(set) var creditsEarned: Double = 0
 
     /// Total credits spent on chat.
-    private(set) var creditsSpent: Double = 0
+    package private(set) var creditsSpent: Double = 0
 
     /// Current balance.
-    var balance: Double { creditsEarned - creditsSpent }
+    package var balance: Double { creditsEarned - creditsSpent }
 
     /// Total time contributed in seconds.
-    private(set) var totalContributionSeconds: TimeInterval = 0
+    package private(set) var totalContributionSeconds: TimeInterval = 0
 
     /// Rate: credits earned per minute of contribution.
-    let creditsPerMinute: Double = 1.0
+    package let creditsPerMinute: Double = 1.0
 
     private var contributionStartTime: Date?
     private var accrualTask: Task<Void, Never>?
     private var accrualSecondsAdded: TimeInterval = 0
+    private let defaults: UserDefaults
 
-    init() {
+    package init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         loadFromDisk()
     }
 
     /// Begin tracking a contribution session.
-    func startContribution() {
+    package func startContribution() {
         guard contributionStartTime == nil else { return }
         contributionStartTime = Date()
         accrualSecondsAdded = 0
@@ -42,7 +44,7 @@ final class CreditLedger {
     }
 
     /// End the current contribution session.
-    func stopContribution() {
+    package func stopContribution() {
         accrualTask?.cancel()
         accrualTask = nil
 
@@ -60,7 +62,7 @@ final class CreditLedger {
 
     /// Deduct credits for a chat interaction. Returns true if sufficient balance.
     @discardableResult
-    func spendCredits(_ amount: Double) -> Bool {
+    package func spendCredits(_ amount: Double) -> Bool {
         guard amount > 0, balance >= amount else { return false }
         creditsSpent += amount
         saveToDisk()
@@ -92,14 +94,12 @@ final class CreditLedger {
     private static let contributionTimeKey = "totalContributionSeconds"
 
     private func saveToDisk() {
-        let defaults = UserDefaults.standard
         defaults.set(creditsEarned, forKey: Self.earnedKey)
         defaults.set(creditsSpent, forKey: Self.spentKey)
         defaults.set(totalContributionSeconds, forKey: Self.contributionTimeKey)
     }
 
     private func loadFromDisk() {
-        let defaults = UserDefaults.standard
         creditsEarned = defaults.double(forKey: Self.earnedKey)
         creditsSpent = defaults.double(forKey: Self.spentKey)
         totalContributionSeconds = defaults.double(forKey: Self.contributionTimeKey)

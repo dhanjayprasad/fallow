@@ -7,33 +7,41 @@ import IOKit.ps
 import OSLog
 
 /// Represents the current system power state.
-enum PowerSource: String, Sendable {
+package enum PowerSource: String, Sendable {
     case battery = "Battery"
     case charger = "AC Power"
     case unknown = "Unknown"
 }
 
+/// Protocol for system state monitoring, enabling test doubles.
+@MainActor
+package protocol SystemMonitoring: AnyObject {
+    var isCharging: Bool { get }
+    var isLowPowerMode: Bool { get }
+    var isSystemHealthy: Bool { get }
+}
+
 @MainActor
 @Observable
-final class SystemMonitor {
+package final class SystemMonitor: SystemMonitoring {
 
-    private(set) var powerSource: PowerSource = .unknown
-    private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    private(set) var isLowPowerMode: Bool = false
+    package private(set) var powerSource: PowerSource = .unknown
+    package private(set) var thermalState: ProcessInfo.ThermalState = .nominal
+    package private(set) var isLowPowerMode: Bool = false
 
     private var monitorTask: Task<Void, Never>?
 
     /// Whether the system is in a healthy thermal state for contribution.
-    var isSystemHealthy: Bool {
+    package var isSystemHealthy: Bool {
         thermalState == .nominal || thermalState == .fair
     }
 
     /// Whether the Mac is plugged in to power.
-    var isCharging: Bool {
+    package var isCharging: Bool {
         powerSource == .charger
     }
 
-    func startMonitoring() {
+    package func startMonitoring() {
         stopMonitoring()
         refresh()
 
@@ -48,7 +56,7 @@ final class SystemMonitor {
         Logger.governor.info("System monitoring started")
     }
 
-    func stopMonitoring() {
+    package func stopMonitoring() {
         monitorTask?.cancel()
         monitorTask = nil
     }
