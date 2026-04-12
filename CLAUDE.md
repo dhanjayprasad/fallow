@@ -62,29 +62,53 @@ These decisions survived three rounds of architectural review and two rounds of 
 
 ```
 fallow/
-  Fallow/                    -- Xcode project
-    App/
-      FallowApp.swift        -- Entry point, menu bar app
-      Views/                 -- SwiftUI views
-      ViewModels/            -- Observable state
-    Core/
-      ResourceGovernor.swift -- Policy engine
-      KwaaiNetManager.swift  -- Binary lifecycle (start/stop/health)
-      CreditLedger.swift     -- Local credit tracking
-    Resources/               -- Assets, bundled kwaainet binary
+  Fallow/                          -- Xcode project root
+    Fallow.xcodeproj/              -- Xcode project file
+    Package.swift                  -- SPM manifest (CLI build verification)
+    Fallow/                        -- Source root
+      FallowApp.swift              -- Entry point, MenuBarExtra + Window scenes
+      Info.plist                   -- LSUIElement = true
+      Fallow.entitlements          -- App entitlements
+      Core/
+        Logging.swift              -- OSLog subsystem definitions
+        ProcessRunner.swift        -- Async subprocess execution
+        KwaaiNetManager.swift      -- Binary lifecycle (start/stop/health)
+        SystemMonitor.swift        -- Power, thermal, Low Power Mode (IOKit)
+        IdleDetector.swift         -- HID idle time (IOKit)
+        ResourceGovernor.swift     -- Policy engine
+        CreditLedger.swift         -- Local credit tracking
+      ViewModels/
+        AppState.swift             -- Central state coordinator
+      Views/
+        StatusMenuView.swift       -- Menu bar popover
+        OnboardingView.swift       -- First-run consent
+        ChatView.swift             -- SSE streaming chat
+        SettingsView.swift         -- Governor configuration
+      Resources/
+        Assets.xcassets/           -- App icon assets
   .claude/
-    agents/                  -- Custom Claude Code agents
-    skills/                  -- Custom Claude Code skills
+    agents/                        -- Custom Claude Code agents
+    skills/                        -- Custom Claude Code skills
+  .github/
+    workflows/build.yml            -- CI build (SPM + Xcode)
+    workflows/release.yml          -- Release pipeline (WIP)
+    ISSUE_TEMPLATE/                -- Bug report and feature request templates
   docs/
-    ARCHITECTURE.md          -- Detailed architecture document
-    KWAAINET_INTEGRATION.md  -- Integration notes and pinned version
+    ARCHITECTURE.md                -- Detailed architecture document
+    KWAAINET_INTEGRATION.md        -- Integration notes and pinned version
+    CLAUDE_CODE_WORKFLOW.md        -- Guide for using Claude Code with the project
   README.md
+  LICENSE
+  CHANGELOG.md
+  CODE_OF_CONDUCT.md
+  CONTRIBUTING.md
 ```
 
 ## Reference Files
 
 - KwaaiNet repo: https://github.com/Kwaai-AI-Lab/KwaaiNet
-- KwaaiNet architecture: see docs/KWAAINET_INTEGRATION.md when created
+- KwaaiNet integration: see docs/KWAAINET_INTEGRATION.md
+- Architecture: see docs/ARCHITECTURE.md
 - Apple Human Interface Guidelines for menu bar apps
 - macOS code signing and notarisation: Apple TN2206
 

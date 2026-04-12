@@ -52,6 +52,7 @@ struct OnboardingView: View {
 
             Button("I Understand, Get Started") {
                 appState.hasCompletedOnboarding = true
+                appState.onOnboardingComplete()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)

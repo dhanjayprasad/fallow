@@ -92,11 +92,24 @@ final class AppState {
 
         await kwaaiNetManager.refreshStatus()
         if kwaaiNetManager.status.isRunning {
-            creditLedger.startContribution()
+            kwaaiNetManager.startHealthPolling()
+            // Only start earning credits if the user has already given consent
+            if hasCompletedOnboarding {
+                creditLedger.startContribution()
+            }
         }
 
-        startGovernorLoop()
+        // Only start auto-contribution after user has given consent
+        if hasCompletedOnboarding {
+            startGovernorLoop()
+        }
+
         setupTerminationHandler()
+    }
+
+    /// Called when the user completes onboarding; starts the governor loop.
+    func onOnboardingComplete() {
+        startGovernorLoop()
     }
 
     /// Toggle contribution on or off.
@@ -160,6 +173,9 @@ final class AppState {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            // queue: .main guarantees we are on the main thread.
+            // MainActor.assumeIsolated is the official bridge for
+            // callback-based APIs that are known to run on the main actor.
             MainActor.assumeIsolated {
                 self.handleTermination()
             }
@@ -177,15 +193,16 @@ final class AppState {
         process.arguments = ["stop"]
         guard (try? process.run()) != nil else { return }
 
-        // Wait up to 3 seconds for graceful shutdown, then force-kill
+        // Give kwaainet stop up to 5 seconds to complete.
+        // Note: process.terminate() would only kill this CLI client,
+        // not the daemonised KwaaiNet node, so we just log on timeout.
         let semaphore = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
             process.waitUntilExit()
             semaphore.signal()
         }
-        if semaphore.wait(timeout: .now() + 3) == .timedOut {
-            process.terminate()
-            Logger.app.warning("kwaainet stop timed out, sent SIGTERM")
+        if semaphore.wait(timeout: .now() + 5) == .timedOut {
+            Logger.app.warning("kwaainet stop did not complete within timeout; daemon may still be running")
         }
     }
 }

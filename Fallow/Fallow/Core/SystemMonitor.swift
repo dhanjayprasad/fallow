@@ -63,7 +63,8 @@ final class SystemMonitor {
 
     private func currentPowerSource() -> PowerSource {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else {
-            return .charger
+            // IOKit query failed; cannot determine power state
+            return .unknown
         }
 
         guard let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef],

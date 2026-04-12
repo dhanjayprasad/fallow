@@ -23,6 +23,7 @@ struct ChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var isStreaming = false
+    @State private var streamTask: Task<Void, Never>?
 
     private let creditsPerMessage: Double = 0.5
 
@@ -73,11 +74,19 @@ struct ChatView: View {
             HStack {
                 TextField("Type a message...", text: $inputText)
                     .textFieldStyle(.plain)
-                    .onSubmit { Task { await send() } }
+                    .onSubmit {
+                        guard !isStreaming else { return }
+                        streamTask = Task { await send() }
+                    }
                     .disabled(isStreaming)
 
                 Button {
-                    Task { await send() }
+                    if isStreaming {
+                        streamTask?.cancel()
+                        isStreaming = false
+                    } else {
+                        streamTask = Task { await send() }
+                    }
                 } label: {
                     Image(systemName: isStreaming
                         ? "stop.fill" : "arrow.up.circle.fill")
@@ -102,7 +111,7 @@ struct ChatView: View {
             Text("Start a conversation")
                 .foregroundStyle(.secondary)
             if !appState.kwaaiNetManager.status.isRunning {
-                Text("KwaaiNet node is not running. Start contributing first.")
+                Text("KwaaiNet node is not running. Start the node to chat.")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -138,8 +147,9 @@ struct ChatView: View {
             let apiMessages = messages.dropLast().map {
                 ["role": $0.role.rawValue, "content": $0.content]
             }
+            let modelName = appState.kwaaiNetManager.status.modelName ?? "default"
             let body: [String: Any] = [
-                "model": "default",
+                "model": modelName,
                 "messages": apiMessages,
                 "stream": true,
             ]
@@ -164,6 +174,7 @@ struct ChatView: View {
             }
 
             for try await line in bytes.lines {
+                guard !Task.isCancelled else { break }
                 guard line.hasPrefix("data: ") else { continue }
                 let data = String(line.dropFirst(6))
                 if data == "[DONE]" { break }
@@ -178,7 +189,11 @@ struct ChatView: View {
                 appendToMessage(id: messageId, content: content)
             }
 
-            appState.creditLedger.spendCredits(creditsPerMessage)
+            // Only charge if we received actual content
+            if let idx = messages.firstIndex(where: { $0.id == messageId }),
+               !messages[idx].content.isEmpty {
+                appState.creditLedger.spendCredits(creditsPerMessage)
+            }
         } catch {
             if let idx = messages.firstIndex(where: { $0.id == messageId }),
                messages[idx].content.isEmpty {

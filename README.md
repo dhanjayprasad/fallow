@@ -31,39 +31,36 @@ Fallow supervises the KwaaiNet binary as a subprocess. They communicate via Kwaa
 ### Prerequisites
 
 - macOS 14.0+
-- Xcode 16+
+- Xcode 16+ (or just Swift 6.0+ for CLI builds)
 - [KwaaiNet CLI](https://github.com/Kwaai-AI-Lab/KwaaiNet/releases/latest) installed for testing
-- [Claude Code](https://docs.claude.com) (recommended for development)
-
-### Claude Code Setup
-
-This project includes custom agents and skills for Claude Code:
-
-- `.claude/agents/architect.md` -- Challenges architectural decisions
-- `.claude/agents/product-critic.md` -- Evaluates from user perspective
-- `.claude/agents/security-reviewer.md` -- Audits trust and security
-- `.claude/agents/swift-expert.md` -- Reviews Swift code quality
-- `.claude/skills/weekend-prototype/` -- Guide for the initial prototype build
-- `.claude/skills/kwaainet-integration/` -- KwaaiNet integration reference
-- `.claude/skills/architecture-review/` -- Multi-agent review workflow
 
 ### Getting Started
 
 ```bash
 # Clone the repo
-git clone https://github.com/[your-username]/fallow.git
+git clone https://github.com/dhanjayprasad/fallow.git
 cd fallow
+
+# Build with Swift Package Manager (no Xcode required)
+cd Fallow && swift build && cd ..
+
+# Or open in Xcode
+open Fallow/Fallow.xcodeproj
 
 # Install KwaaiNet for local testing
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Kwaai-AI-Lab/KwaaiNet/releases/latest/download/kwaainet-installer.sh | sh
 kwaainet setup
 kwaainet benchmark
+```
 
-# Open in Claude Code
-claude
+### Claude Code (optional)
 
-# Start with the weekend prototype
-/weekend-prototype
+[Claude Code](https://docs.claude.com) is recommended for development. This project includes custom agents and skills:
+
+```bash
+claude                    # Open Claude Code
+/weekend-prototype        # Guided prototype build
+/architecture-review      # Multi-agent review cycle
 ```
 
 ## Contributing

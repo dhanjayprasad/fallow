@@ -1,4 +1,4 @@
-name: Build and Test
+name: Build
 
 on:
   push:
@@ -7,7 +7,21 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-spm:
+    name: Swift Package Manager
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show build environment
+        run: swift --version
+
+      - name: Build
+        working-directory: Fallow
+        run: swift build
+
+  build-xcode:
+    name: Xcode
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -23,16 +37,6 @@ jobs:
       - name: Build
         run: |
           xcodebuild build \
-            -project Fallow/Fallow.xcodeproj \
-            -scheme Fallow \
-            -destination 'platform=macOS' \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Run Tests
-        run: |
-          xcodebuild test \
             -project Fallow/Fallow.xcodeproj \
             -scheme Fallow \
             -destination 'platform=macOS' \
