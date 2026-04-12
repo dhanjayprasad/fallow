@@ -38,7 +38,7 @@ package enum PortChecker {
     /// Checks both KwaaiNet ports and returns any conflicts found.
     package static func checkKwaaiNetPorts() -> [Conflict] {
         var conflicts: [Conflict] = []
-        let ports: [UInt16] = [8080, 8000]
+        let ports: [UInt16] = [KwaaiNetPorts.p2p, KwaaiNetPorts.api]
 
         for port in ports {
             if !isPortAvailable(port) {

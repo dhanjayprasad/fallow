@@ -1,5 +1,5 @@
 // KwaaiNetManager.swift
-// Manages the KwaaiNet binary lifecycle: start, stop, health checks.
+// Manages the KwaaiNet binary lifecycle: P2P daemon and local API server.
 // Part of Fallow. MIT licence.
 
 import Foundation
@@ -7,14 +7,16 @@ import OSLog
 
 /// Information about the running KwaaiNet node.
 package struct KwaaiNetStatus: Sendable {
-    package var isRunning: Bool = false
+    package var isDaemonRunning: Bool = false
+    package var isApiRunning: Bool = false
     package var modelName: String?
-    package var connectionCount: Int?
 
-    package init(isRunning: Bool = false, modelName: String? = nil, connectionCount: Int? = nil) {
-        self.isRunning = isRunning
+    package var isRunning: Bool { isDaemonRunning || isApiRunning }
+
+    package init(isDaemonRunning: Bool = false, isApiRunning: Bool = false, modelName: String? = nil) {
+        self.isDaemonRunning = isDaemonRunning
+        self.isApiRunning = isApiRunning
         self.modelName = modelName
-        self.connectionCount = connectionCount
     }
 }
 
@@ -25,6 +27,14 @@ package enum SetupState: Sendable, Equatable {
     case running(String)
     case completed
     case failed(String)
+}
+
+/// Network port configuration for KwaaiNet services.
+package enum KwaaiNetPorts {
+    /// Port for the local OpenAI-compatible API (kwaainet serve).
+    package static let api: UInt16 = 11435
+    /// Port used by the P2P daemon (p2pd).
+    package static let p2p: UInt16 = 8080
 }
 
 @MainActor
@@ -38,9 +48,10 @@ package final class KwaaiNetManager {
     package private(set) var currentAuthToken: String?
 
     private var healthCheckTask: Task<Void, Never>?
+    private var serveProcess: Process?
 
-    /// URLSession with a short timeout for health checks and model discovery.
-    private static let healthSession: URLSession = {
+    /// URLSession with a short timeout for API checks.
+    private static let apiSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 5
         return URLSession(configuration: config)
@@ -61,7 +72,7 @@ package final class KwaaiNetManager {
         #endif
     }
 
-    /// Starts the KwaaiNet daemon with full pre-flight checks.
+    /// Starts the KwaaiNet P2P daemon and local API server.
     package func start() async {
         guard !isTransitioning else { return }
         guard let binary = binaryPath else {
@@ -72,7 +83,7 @@ package final class KwaaiNetManager {
 
         isTransitioning = true
         lastError = nil
-        Logger.kwaainet.info("Starting kwaainet daemon")
+        Logger.kwaainet.info("Starting KwaaiNet services")
 
         // 1. Verify binary code signature (Release builds only)
         let verification = BinaryVerifier.verify(binaryPath: binary)
@@ -84,11 +95,16 @@ package final class KwaaiNetManager {
         }
 
         // 2. Check port availability
-        let conflicts = PortChecker.checkKwaaiNetPorts()
+        var portsToCheck: [UInt16] = [KwaaiNetPorts.api]
+        // Only check P2P port if no daemon is already running
+        if !status.isDaemonRunning {
+            portsToCheck.append(KwaaiNetPorts.p2p)
+        }
+        let conflicts = portsToCheck.compactMap { port in
+            PortChecker.isPortAvailable(port) ? nil : PortChecker.Conflict(port: port, processName: nil)
+        }
         if !conflicts.isEmpty {
-            let desc = conflicts.map { conflict in
-                "Port \(conflict.port)\(conflict.processName.map { " (used by \($0))" } ?? "")"
-            }.joined(separator: ", ")
+            let desc = conflicts.map { "Port \($0.port)" }.joined(separator: ", ")
             lastError = "\(desc) already in use. KwaaiNet cannot start."
             Logger.network.error("Port conflicts detected: \(desc)")
             isTransitioning = false
@@ -97,7 +113,7 @@ package final class KwaaiNetManager {
 
         // 3. First-run setup detection
         if needsSetup() {
-            setupState = .running("Setting up KwaaiNet identity and dependencies...")
+            setupState = .running("Setting up KwaaiNet configuration...")
             Logger.kwaainet.info("First-run setup needed, running kwaainet setup")
 
             do {
@@ -109,12 +125,10 @@ package final class KwaaiNetManager {
                     let err = setupResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                     setupState = .failed(err)
                     lastError = "KwaaiNet setup failed: \(err)"
-                    Logger.kwaainet.error("kwaainet setup failed: \(err)")
                     isTransitioning = false
                     return
                 }
                 setupState = .completed
-                Logger.kwaainet.info("kwaainet setup completed successfully")
             } catch {
                 setupState = .failed(error.localizedDescription)
                 lastError = "KwaaiNet setup failed: \(error.localizedDescription)"
@@ -125,9 +139,8 @@ package final class KwaaiNetManager {
 
         // 4. Generate auth token for this session
         currentAuthToken = AuthTokenManager.generateToken()
-        Logger.kwaainet.info("Generated auth token for daemon session")
 
-        // 5. Launch the daemon with auth token in environment
+        // 5. Start P2P daemon for network contribution
         do {
             var env: [String: String] = [:]
             if let token = currentAuthToken {
@@ -141,31 +154,42 @@ package final class KwaaiNetManager {
             )
 
             if !result.succeeded {
-                lastError = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                Logger.kwaainet.error("kwaainet start failed: \(result.stderr)")
-                isTransitioning = false
-                return
-            }
-
-            // 6. Wait for daemon to become ready
-            let ready = await waitForHealth(timeoutSeconds: 30)
-            if !ready {
-                lastError = "KwaaiNet daemon did not become ready in time"
-                Logger.kwaainet.warning("Health check did not succeed within timeout")
-            }
-            await refreshStatus()
-            if status.isRunning {
-                startHealthPolling()
+                let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Non-fatal: daemon might already be running
+                if !err.contains("already running") {
+                    Logger.kwaainet.warning("kwaainet start --daemon: \(err)")
+                }
             }
         } catch {
-            lastError = error.localizedDescription
-            Logger.kwaainet.error("Failed to launch kwaainet: \(error)")
+            Logger.kwaainet.warning("Failed to start P2P daemon: \(error)")
+        }
+
+        // 6. Start local API server (kwaainet serve) as a long-running process
+        do {
+            try startServeProcess(binary: binary)
+        } catch {
+            lastError = "Failed to start API server: \(error.localizedDescription)"
+            Logger.kwaainet.error("Failed to start kwaainet serve: \(error)")
+            isTransitioning = false
+            return
+        }
+
+        // 7. Wait for the API to become ready
+        let ready = await waitForApi(timeoutSeconds: 30)
+        if !ready {
+            lastError = "KwaaiNet API did not become ready in time"
+            Logger.kwaainet.warning("API did not respond within timeout")
+        }
+
+        await refreshStatus()
+        if status.isRunning {
+            startHealthPolling()
         }
 
         isTransitioning = false
     }
 
-    /// Stops the KwaaiNet daemon gracefully.
+    /// Stops all KwaaiNet services.
     package func stop() async {
         guard !isTransitioning else { return }
         guard let binary = binaryPath else { return }
@@ -173,51 +197,78 @@ package final class KwaaiNetManager {
         isTransitioning = true
         lastError = nil
         stopHealthPolling()
-        Logger.kwaainet.info("Stopping kwaainet daemon")
+        Logger.kwaainet.info("Stopping KwaaiNet services")
 
+        // Stop the serve process first
+        if let serve = serveProcess, serve.isRunning {
+            serve.terminate()
+            serve.waitUntilExit()
+            serveProcess = nil
+        }
+
+        // Stop the P2P daemon
         do {
             let result = try await ProcessRunner.run(
                 executablePath: binary,
                 arguments: ["stop"]
             )
-
             if !result.succeeded {
                 Logger.kwaainet.warning("kwaainet stop returned non-zero: \(result.stderr)")
             }
-
-            try await Task.sleep(for: .seconds(2))
-            await refreshStatus()
         } catch {
             Logger.kwaainet.error("Failed to stop kwaainet: \(error)")
             lastError = error.localizedDescription
         }
 
+        try? await Task.sleep(for: .seconds(1))
+        await refreshStatus()
         currentAuthToken = nil
         isTransitioning = false
     }
 
-    /// Queries the KwaaiNet health endpoint and updates status.
+    /// Checks the status of both the daemon and the API server.
     package func refreshStatus() async {
-        guard let request = authenticatedRequest(
-            url: "http://localhost:8080/health"
-        ) else { return }
+        // Check daemon via CLI
+        if let binary = binaryPath {
+            do {
+                let result = try await ProcessRunner.run(
+                    executablePath: binary,
+                    arguments: ["status"]
+                )
+                status.isDaemonRunning = result.succeeded
+                    && result.stdout.contains("Running")
+            } catch {
+                status.isDaemonRunning = false
+            }
+        }
+
+        // Check API server via HTTP
+        let apiBase = "http://localhost:\(KwaaiNetPorts.api)"
+        guard let request = authenticatedRequest(url: "\(apiBase)/v1/models") else {
+            status.isApiRunning = false
+            return
+        }
 
         do {
-            let (_, response) = try await Self.healthSession.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse,
-               httpResponse.statusCode == 200 {
-                status.isRunning = true
-                await fetchModelInfo()
+            let (data, response) = try await Self.apiSession.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                status.isApiRunning = true
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let models = json["data"] as? [[String: Any]],
+                   let firstModel = models.first,
+                   let modelId = firstModel["id"] as? String {
+                    status.modelName = modelId
+                }
                 return
             }
         } catch {
-            Logger.kwaainet.debug("Health check failed: \(error.localizedDescription)")
+            Logger.kwaainet.debug("API check failed: \(error.localizedDescription)")
         }
 
-        status = KwaaiNetStatus(isRunning: false)
+        status.isApiRunning = false
     }
 
-    /// Begins periodic health polling. Call when attaching to an existing daemon.
+    /// Begins periodic health polling.
     package func startHealthPolling() {
         stopHealthPolling()
         healthCheckTask = Task { [weak self] in
@@ -231,7 +282,24 @@ package final class KwaaiNetManager {
 
     // MARK: - Private
 
-    /// Creates a URLRequest with the current auth token header.
+    private func startServeProcess(binary: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["serve", "--port", "\(KwaaiNetPorts.api)"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        if let token = currentAuthToken {
+            var env = ProcessInfo.processInfo.environment
+            env[AuthTokenManager.envVarName] = token
+            process.environment = env
+        }
+
+        try process.run()
+        serveProcess = process
+        Logger.kwaainet.info("Started kwaainet serve on port \(KwaaiNetPorts.api)")
+    }
+
     private func authenticatedRequest(url: String) -> URLRequest? {
         guard let url = URL(string: url) else { return nil }
         var request = URLRequest(url: url)
@@ -243,50 +311,33 @@ package final class KwaaiNetManager {
 
     /// Checks whether kwaainet first-run setup is needed.
     private func needsSetup() -> Bool {
-        let identityPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".kwaainet/identity.key").path
-        let exists = FileManager.default.fileExists(atPath: identityPath)
+        let configPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".kwaainet/config.yaml").path
+        let exists = FileManager.default.fileExists(atPath: configPath)
         if !exists {
-            Logger.kwaainet.info("KwaaiNet identity key not found at \(identityPath)")
+            Logger.kwaainet.info("KwaaiNet config not found at \(configPath)")
         }
         return !exists
     }
 
-    /// Polls the health endpoint until it responds or the timeout expires.
-    private func waitForHealth(timeoutSeconds: Int) async -> Bool {
+    /// Polls the API endpoint until it responds or the timeout expires.
+    private func waitForApi(timeoutSeconds: Int) async -> Bool {
+        let apiBase = "http://localhost:\(KwaaiNetPorts.api)"
         for _ in 0..<timeoutSeconds {
             try? await Task.sleep(for: .seconds(1))
-            guard let request = authenticatedRequest(
-                url: "http://localhost:8080/health"
-            ) else { return false }
+            guard let request = authenticatedRequest(url: "\(apiBase)/v1/models") else {
+                return false
+            }
             do {
-                let (_, response) = try await Self.healthSession.data(for: request)
+                let (_, response) = try await Self.apiSession.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                     return true
                 }
             } catch {
-                // Keep waiting; daemon may still be starting
+                // Keep waiting; model still loading
             }
         }
         return false
-    }
-
-    private func fetchModelInfo() async {
-        guard let request = authenticatedRequest(
-            url: "http://localhost:8000/v1/models"
-        ) else { return }
-
-        do {
-            let (data, _) = try await Self.healthSession.data(for: request)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let models = json["data"] as? [[String: Any]],
-               let firstModel = models.first,
-               let modelId = firstModel["id"] as? String {
-                status.modelName = modelId
-            }
-        } catch {
-            Logger.kwaainet.debug("Could not fetch model info: \(error)")
-        }
     }
 
     private func stopHealthPolling() {

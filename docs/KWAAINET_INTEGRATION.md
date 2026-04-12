@@ -1,10 +1,19 @@
 # KwaaiNet Integration
 
-This document describes how Fallow integrates with the [KwaaiNet](https://github.com/Kwaai-AI-Lab/KwaaiNet) binary. It is written for contributors and for the KwaaiNet team to review.
+This document describes how Fallow integrates with the [KwaaiNet](https://github.com/Kwaai-AI-Lab/KwaaiNet) binary (tested against v0.4.1). Written for contributors and the KwaaiNet team.
 
 ## Pinned Version
 
-Fallow pins to a specific tested KwaaiNet release. The binary is bundled inside the app and must not self-update (code signing would break). Check the [KwaaiNet releases page](https://github.com/Kwaai-AI-Lab/KwaaiNet/releases) for the current stable version.
+Fallow was developed and tested against **KwaaiNet v0.4.1**. Pin to a specific tested release. The binary is bundled inside the app and must not self-update (code signing would break).
+
+## Architecture
+
+Fallow manages TWO KwaaiNet services:
+
+1. **P2P daemon** (`kwaainet start --daemon`): joins the distributed network, serves model shards to peers. Uses port 8080 (via p2pd).
+2. **Local API server** (`kwaainet serve --port 11435`): serves an OpenAI-compatible HTTP API for the chat interface. Uses port 11435.
+
+Both are started when the user clicks "Start Contributing" and stopped on "Stop Contributing" or app quit.
 
 ## Binary Location
 
@@ -15,42 +24,36 @@ Fallow.app/Contents/Helpers/kwaainet
 Fallow.app/Contents/Helpers/p2pd
 ```
 
-Both must be signed with the same Developer ID before the outer app is signed. Sign innermost first.
+Both must be signed with the same Developer ID before the outer app is signed.
 
 ## CLI Interface
 
-Fallow uses these CLI commands:
-
 | Command | Purpose | Used By |
 |---------|---------|---------|
-| `kwaainet start --daemon` | Launch background node | KwaaiNetManager.start() |
-| `kwaainet stop` | Graceful shutdown | KwaaiNetManager.stop() |
-| `kwaainet setup` | First-time identity and model setup | Not yet automated |
-| `kwaainet status` | Show running state | Reserved for future use |
+| `kwaainet setup` | First-time config creation | KwaaiNetManager (auto-detected) |
+| `kwaainet start --daemon` | Launch P2P background node | KwaaiNetManager.start() |
+| `kwaainet stop` | Graceful daemon shutdown | KwaaiNetManager.stop() |
+| `kwaainet status` | Show daemon running state | KwaaiNetManager.refreshStatus() |
+| `kwaainet serve --port 11435` | Start local OpenAI API server | KwaaiNetManager.start() |
 
 ## HTTP API
 
-Once the daemon is running, Fallow communicates via HTTP:
-
-**Health check** (5-second timeout):
-```
-GET http://localhost:8080/health
-200 OK = daemon is running
-```
+Once `kwaainet serve` is running:
 
 **Model discovery**:
 ```
-GET http://localhost:8000/v1/models
-Response: { "data": [{ "id": "model-name", ... }] }
+GET http://localhost:11435/v1/models
+Response: { "data": [{ "id": "llama3.1:8b", "object": "model", "owned_by": "kwaai" }] }
 ```
 
 **Chat completions** (SSE streaming):
 ```
-POST http://localhost:8000/v1/chat/completions
+POST http://localhost:11435/v1/chat/completions
 Content-Type: application/json
+X-Fallow-Token: <session-token>
 
 {
-  "model": "<discovered model id>",
+  "model": "llama3.1:8b",
   "messages": [{"role": "user", "content": "..."}],
   "stream": true
 }
@@ -62,34 +65,36 @@ SSE frames follow the OpenAI format: `data: {"choices":[{"delta":{"content":"tok
 
 Fallow generates a random 32-byte hex token on each daemon start and passes it to kwaainet as the `FALLOW_AUTH_TOKEN` environment variable. All HTTP requests from Fallow include this token in the `X-Fallow-Token` header.
 
-KwaaiNet does not currently validate this token server-side. The plumbing is in place for when KwaaiNet adds token validation. The token prevents casual API abuse by other processes on the same machine.
+KwaaiNet does not currently validate this token server-side. The plumbing is in place for when KwaaiNet adds token validation.
 
 ## First-Run Setup
 
-Before starting the daemon, Fallow checks for `~/.kwaainet/identity.key`. If the file does not exist, Fallow runs `kwaainet setup` automatically and shows progress in the menu bar popover. This creates the identity keypair and downloads dependencies.
+Before starting, Fallow checks for `~/.kwaainet/config.yaml`. If the file does not exist, Fallow runs `kwaainet setup` automatically and shows progress in the menu bar popover. Setup creates the config file and default settings.
 
 ## Binary Verification
 
-In Release builds, Fallow verifies the kwaainet binary's code signature using `SecStaticCodeCheckValidity` before launching it. If the signature is missing or invalid, the binary is not executed. Debug builds skip this check (development binaries are typically unsigned).
+In Release builds, Fallow verifies the kwaainet binary's code signature using `SecStaticCodeCheckValidity` before launching. Debug builds skip this check.
 
 ## Known Gotchas
 
-1. **Self-update must be disabled.** `kwaainet update` would mutate the binary inside a signed app bundle. Fallow manages updates by shipping new DMGs with updated binaries.
+1. **Self-update must be disabled.** `kwaainet update` would mutate the binary inside a signed app bundle.
 
-2. **First-run model download.** `kwaainet setup` and the first `start` download model weights (potentially several GB). Fallow waits up to 30 seconds for the health endpoint during startup, but model download may take longer. Future versions should surface download progress.
+2. **Model loading takes time.** `kwaainet serve` loads the model into memory on startup. For an 8B parameter model, this takes ~12 seconds. Fallow waits up to 30 seconds.
 
-3. **p2pd companion binary.** KwaaiNet requires `p2pd` alongside `kwaainet`. Both must be bundled and signed. `kwaainet setup --get-deps` downloads it, but inside a bundle it must be pre-included.
+3. **p2pd companion binary.** KwaaiNet requires `p2pd` alongside `kwaainet`. Both must be bundled and signed.
 
-4. **Identity persistence.** KwaaiNet generates `~/.kwaainet/identity.key` (Ed25519 keypair) on first setup. This must survive across app updates. Do not delete `~/.kwaainet/`.
+4. **Config persistence.** KwaaiNet stores config at `~/.kwaainet/config.yaml`. This must survive across app updates.
 
-5. **Port conflicts.** Ports 8080 (node) and 8000 (API) are hardcoded. If another service uses these ports, KwaaiNet will fail to start. Future versions should detect conflicts and support configurable ports.
+5. **Port layout.** Port 8080 is used by p2pd for P2P networking. Port 11435 is used by `kwaainet serve` for the local API. These are different from the port numbers in KwaaiNet's own documentation for `shard api`.
 
-6. **Graceful shutdown timing.** `kwaainet stop` may take several seconds to drain connections. Fallow gives it 5 seconds during app termination before logging a warning.
+6. **Graceful shutdown.** `kwaainet stop` takes ~5 seconds to drain P2P connections. The serve process is terminated directly via SIGTERM.
+
+7. **Local models.** `kwaainet serve` requires a local model (e.g., Ollama's `llama3.1:8b`). If no model is available, serve fails with "Model not found in local cache."
 
 ## What Fallow Does NOT Do
 
 - Fallow does not modify KwaaiNet configuration files
-- Fallow does not call `kwaainet update` (breaks code signing)
-- Fallow does not manage model downloads (deferred to v0.2)
+- Fallow does not call `kwaainet update`
+- Fallow does not manage model downloads (requires Ollama or manual setup)
 - Fallow does not expose KwaaiNet's network ports to the internet
 - Fallow does not claim to verify inference output correctness

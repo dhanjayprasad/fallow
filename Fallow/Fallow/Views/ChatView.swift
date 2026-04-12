@@ -168,7 +168,7 @@ package struct ChatView: View {
                 "stream": true,
             ]
 
-            guard let url = URL(string: "http://localhost:8000/v1/chat/completions") else {
+            guard let url = URL(string: "http://localhost:\(KwaaiNetPorts.api)/v1/chat/completions") else {
                 updateMessage(id: messageId, content: "Error: invalid API URL")
                 return
             }
