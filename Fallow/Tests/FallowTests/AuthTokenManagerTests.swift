@@ -2,32 +2,38 @@
 // Unit tests for authentication token generation.
 // Part of Fallow. MIT licence.
 
-import XCTest
+import Testing
+import Foundation
 @testable import FallowCore
 
-final class AuthTokenManagerTests: XCTestCase {
+@Suite("AuthTokenManager")
+struct AuthTokenManagerTests {
 
-    func testTokenLength() {
+    @Test("Token is 64 hex characters (32 bytes)")
+    func tokenLength() {
         let token = AuthTokenManager.generateToken()
-        XCTAssertEqual(token.count, 64) // 32 bytes = 64 hex chars
+        #expect(token.count == 64)
     }
 
-    func testTokenUniqueness() {
+    @Test("Two tokens are different")
+    func tokenUniqueness() {
         let token1 = AuthTokenManager.generateToken()
         let token2 = AuthTokenManager.generateToken()
-        XCTAssertNotEqual(token1, token2)
+        #expect(token1 != token2)
     }
 
-    func testTokenHexOnly() {
+    @Test("Token contains only hex characters")
+    func tokenHexOnly() {
         let token = AuthTokenManager.generateToken()
         let hexChars = CharacterSet(charactersIn: "0123456789abcdef")
         let tokenChars = CharacterSet(charactersIn: token)
-        XCTAssertTrue(tokenChars.isSubset(of: hexChars))
+        #expect(tokenChars.isSubset(of: hexChars))
     }
 
-    func testTokenApplied() {
+    @Test("Token is applied to URLRequest")
+    func tokenApplied() {
         var request = URLRequest(url: URL(string: "http://localhost:8080/health")!)
         AuthTokenManager.applyToken("test-token-123", to: &request)
-        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Fallow-Token"), "test-token-123")
+        #expect(request.value(forHTTPHeaderField: "X-Fallow-Token") == "test-token-123")
     }
 }

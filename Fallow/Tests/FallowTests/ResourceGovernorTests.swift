@@ -2,7 +2,8 @@
 // Unit tests for the ResourceGovernor policy engine.
 // Part of Fallow. MIT licence.
 
-import XCTest
+import Testing
+import Foundation
 @testable import FallowCore
 
 // MARK: - Test Doubles
@@ -23,81 +24,76 @@ final class MockIdleDetector: IdleDetecting {
 
 // MARK: - Tests
 
-final class ResourceGovernorTests: XCTestCase {
+@Suite("ResourceGovernor")
+struct ResourceGovernorTests {
 
-    @MainActor
-    func testAllowedWhenAllConditionsMet() {
+    @MainActor @Test("Allows contribution when all conditions met")
+    func allowedWhenAllConditionsMet() {
         let monitor = MockSystemMonitor()
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
-
         let result = governor.evaluate()
-        XCTAssertTrue(result.shouldContribute)
-        XCTAssertEqual(result.reason, .allowed)
+        #expect(result.shouldContribute == true)
+        #expect(result.reason == .allowed)
     }
 
-    @MainActor
-    func testBlockedWhenNotIdle() {
+    @MainActor @Test("Blocks when user is not idle")
+    func blockedWhenNotIdle() {
         let monitor = MockSystemMonitor()
         let detector = MockIdleDetector()
         detector.isIdle = false
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
-
         let result = governor.evaluate()
-        XCTAssertFalse(result.shouldContribute)
-        XCTAssertEqual(result.reason, .userNotIdle)
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .userNotIdle)
     }
 
-    @MainActor
-    func testBlockedOnBattery() {
+    @MainActor @Test("Blocks when on battery with requireCharging enabled")
+    func blockedOnBattery() {
         let monitor = MockSystemMonitor()
         monitor.isCharging = false
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
-
         let result = governor.evaluate()
-        XCTAssertFalse(result.shouldContribute)
-        XCTAssertEqual(result.reason, .onBattery)
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .onBattery)
     }
 
-    @MainActor
-    func testBlockedLowPowerMode() {
+    @MainActor @Test("Blocks when Low Power Mode is on")
+    func blockedLowPowerMode() {
         let monitor = MockSystemMonitor()
         monitor.isLowPowerMode = true
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
-
         let result = governor.evaluate()
-        XCTAssertFalse(result.shouldContribute)
-        XCTAssertEqual(result.reason, .lowPowerMode)
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .lowPowerMode)
     }
 
-    @MainActor
-    func testBlockedThermalPressure() {
+    @MainActor @Test("Blocks when thermal pressure is high")
+    func blockedThermalPressure() {
         let monitor = MockSystemMonitor()
         monitor.isSystemHealthy = false
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
-
         let result = governor.evaluate()
-        XCTAssertFalse(result.shouldContribute)
-        XCTAssertEqual(result.reason, .thermalPressure)
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .thermalPressure)
     }
 
-    @MainActor
-    func testManualPausePrecedence() {
+    @MainActor @Test("Manual pause takes precedence over all conditions")
+    func manualPausePrecedence() {
         let monitor = MockSystemMonitor()
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
         governor.isManuallyPaused = true
-
         let result = governor.evaluate()
-        XCTAssertFalse(result.shouldContribute)
-        XCTAssertEqual(result.reason, .manuallyPaused)
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .manuallyPaused)
     }
 
-    @MainActor
-    func testQuietHoursMidnightWrap() {
+    @MainActor @Test("Quiet hours wrapping midnight (23:00 to 07:00)")
+    func quietHoursMidnightWrap() {
         let monitor = MockSystemMonitor()
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
@@ -106,13 +102,12 @@ final class ResourceGovernorTests: XCTestCase {
             quietHoursStart: 23,
             quietHoursEnd: 7
         )
-
         let result = governor.evaluate()
         let hour = Calendar.current.component(.hour, from: Date())
         if hour >= 23 || hour < 7 {
-            XCTAssertEqual(result.reason, .quietHours)
+            #expect(result.reason == .quietHours)
         } else {
-            XCTAssertEqual(result.reason, .allowed)
+            #expect(result.reason == .allowed)
         }
     }
 }

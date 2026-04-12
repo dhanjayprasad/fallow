@@ -7,6 +7,9 @@ import PackageDescription
 let package = Package(
     name: "Fallow",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-testing.git", from: "0.12.0"),
+    ],
     targets: [
         .target(
             name: "FallowCore",
@@ -26,7 +29,10 @@ let package = Package(
         ),
         .testTarget(
             name: "FallowTests",
-            dependencies: ["FallowCore"],
+            dependencies: [
+                "FallowCore",
+                .product(name: "Testing", package: "swift-testing"),
+            ],
             path: "Tests/FallowTests"
         ),
     ]

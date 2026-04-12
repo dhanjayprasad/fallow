@@ -2,27 +2,30 @@
 // Unit tests for binary code signature verification.
 // Part of Fallow. MIT licence.
 
-import XCTest
+import Testing
+import Foundation
 @testable import FallowCore
 
-final class BinaryVerifierTests: XCTestCase {
+@Suite("BinaryVerifier")
+struct BinaryVerifierTests {
 
-    func testDebugSkipsVerification() {
+    @Test("Debug builds skip verification")
+    func debugSkipsVerification() {
         let result = BinaryVerifier.verify(binaryPath: "/usr/bin/true")
         #if DEBUG
-        XCTAssertEqual(result, .skipped)
+        #expect(result == .skipped)
         #else
-        // In release, /usr/bin/true is Apple-signed, should be .valid
-        XCTAssertEqual(result, .valid)
+        #expect(result == .valid)
         #endif
     }
 
-    func testNonexistentPath() {
+    @Test("Nonexistent path handled correctly")
+    func nonexistentPath() {
         let result = BinaryVerifier.verify(binaryPath: "/nonexistent/binary")
         #if DEBUG
-        XCTAssertEqual(result, .skipped)
+        #expect(result == .skipped)
         #else
-        XCTAssertNotEqual(result, .valid)
+        #expect(result != .valid)
         #endif
     }
 }

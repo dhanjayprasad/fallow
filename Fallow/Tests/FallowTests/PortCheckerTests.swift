@@ -2,19 +2,23 @@
 // Unit tests for port conflict detection.
 // Part of Fallow. MIT licence.
 
-import XCTest
+import Testing
+import Foundation
 @testable import FallowCore
 
-final class PortCheckerTests: XCTestCase {
+@Suite("PortChecker")
+struct PortCheckerTests {
 
-    func testAvailablePort() {
+    @Test("High ephemeral port is available")
+    func availablePort() {
         let available = PortChecker.isPortAvailable(59123)
-        XCTAssertTrue(available)
+        #expect(available == true)
     }
 
-    func testOccupiedPort() {
+    @Test("Occupied port is detected")
+    func occupiedPort() {
         let sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        XCTAssertGreaterThanOrEqual(sock, 0)
+        #expect(sock >= 0)
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -26,11 +30,10 @@ final class PortCheckerTests: XCTestCase {
                 bind(sock, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        XCTAssertEqual(bindResult, 0)
+        #expect(bindResult == 0)
 
         let available = PortChecker.isPortAvailable(59124)
         close(sock)
-
-        XCTAssertFalse(available)
+        #expect(available == false)
     }
 }

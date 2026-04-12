@@ -2,50 +2,50 @@
 // Unit tests for the CreditLedger credit tracking system.
 // Part of Fallow. MIT licence.
 
-import XCTest
+import Testing
+import Foundation
 @testable import FallowCore
 
-final class CreditLedgerTests: XCTestCase {
+@Suite("CreditLedger")
+struct CreditLedgerTests {
 
     private func makeTestDefaults() -> UserDefaults {
         let suiteName = "com.fallow.test.\(UUID().uuidString)"
         return UserDefaults(suiteName: suiteName)!
     }
 
-    @MainActor
-    func testInitialBalanceZero() {
+    @MainActor @Test("Initial balance is zero")
+    func initialBalanceZero() {
         let ledger = CreditLedger(defaults: makeTestDefaults())
-        XCTAssertEqual(ledger.balance, 0)
-        XCTAssertEqual(ledger.creditsEarned, 0)
-        XCTAssertEqual(ledger.creditsSpent, 0)
+        #expect(ledger.balance == 0)
+        #expect(ledger.creditsEarned == 0)
+        #expect(ledger.creditsSpent == 0)
     }
 
-    @MainActor
-    func testSpendReducesBalance() {
+    @MainActor @Test("Spending credits reduces balance")
+    func spendReducesBalance() {
         let defaults = makeTestDefaults()
         defaults.set(10.0, forKey: "creditsEarned")
         let ledger = CreditLedger(defaults: defaults)
-
         let success = ledger.spendCredits(3.0)
-        XCTAssertTrue(success)
-        XCTAssertEqual(ledger.balance, 7.0)
+        #expect(success == true)
+        #expect(ledger.balance == 7.0)
     }
 
-    @MainActor
-    func testSpendFailsInsufficientBalance() {
+    @MainActor @Test("Spending fails when insufficient balance")
+    func spendFailsInsufficientBalance() {
         let ledger = CreditLedger(defaults: makeTestDefaults())
         let success = ledger.spendCredits(5.0)
-        XCTAssertFalse(success)
-        XCTAssertEqual(ledger.balance, 0)
+        #expect(success == false)
+        #expect(ledger.balance == 0)
     }
 
-    @MainActor
-    func testSpendFailsNegativeAmount() {
+    @MainActor @Test("Spending fails for zero or negative amount")
+    func spendFailsNegativeAmount() {
         let defaults = makeTestDefaults()
         defaults.set(10.0, forKey: "creditsEarned")
         let ledger = CreditLedger(defaults: defaults)
-
-        XCTAssertFalse(ledger.spendCredits(0))
-        XCTAssertFalse(ledger.spendCredits(-1))
+        #expect(ledger.spendCredits(0) == false)
+        #expect(ledger.spendCredits(-1) == false)
     }
 }
