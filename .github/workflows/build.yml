@@ -1,0 +1,41 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Show build environment
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project Fallow/Fallow.xcodeproj \
+            -scheme Fallow \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run Tests
+        run: |
+          xcodebuild test \
+            -project Fallow/Fallow.xcodeproj \
+            -scheme Fallow \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO

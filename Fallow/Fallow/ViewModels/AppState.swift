@@ -1,0 +1,191 @@
+// AppState.swift
+// Central application state coordinating all subsystems.
+// Part of Fallow. MIT licence.
+
+import SwiftUI
+import OSLog
+
+@MainActor
+@Observable
+final class AppState {
+
+    let kwaaiNetManager: KwaaiNetManager
+    let systemMonitor: SystemMonitor
+    let idleDetector: IdleDetector
+    let creditLedger: CreditLedger
+    let resourceGovernor: ResourceGovernor
+
+    /// Whether auto-contribution mode is enabled.
+    var autoContribute: Bool = true {
+        didSet { evaluateContribution() }
+    }
+
+    /// Whether the user has completed the onboarding consent flow.
+    var hasCompletedOnboarding: Bool {
+        get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
+        set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
+    }
+
+    /// SF Symbol name for the menu bar icon.
+    var menuBarIcon: String {
+        if kwaaiNetManager.isTransitioning {
+            return "arrow.triangle.2.circlepath"
+        }
+        return kwaaiNetManager.status.isRunning ? "circle.fill" : "circle"
+    }
+
+    /// Colour for the menu bar icon.
+    var menuBarColour: Color {
+        if kwaaiNetManager.isTransitioning { return .orange }
+        return kwaaiNetManager.status.isRunning ? .green : .secondary
+    }
+
+    /// Human-readable status string.
+    var statusText: String {
+        if kwaaiNetManager.isTransitioning { return "Starting..." }
+        if !kwaaiNetManager.status.isRunning { return "Stopped" }
+        if let model = kwaaiNetManager.status.modelName {
+            return "Contributing: \(model)"
+        }
+        return "Running"
+    }
+
+    /// Formatted contribution time.
+    var contributionTimeFormatted: String {
+        let total = creditLedger.totalContributionSeconds
+        let hours = Int(total) / 3600
+        let minutes = (Int(total) % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
+    }
+
+    private var governorTask: Task<Void, Never>?
+    private var hasPerformedSetup = false
+
+    init() {
+        let manager = KwaaiNetManager()
+        let monitor = SystemMonitor()
+        let detector = IdleDetector()
+        let ledger = CreditLedger()
+
+        self.kwaaiNetManager = manager
+        self.systemMonitor = monitor
+        self.idleDetector = detector
+        self.creditLedger = ledger
+        self.resourceGovernor = ResourceGovernor(
+            systemMonitor: monitor,
+            idleDetector: detector
+        )
+
+        Logger.app.info("AppState initialised")
+    }
+
+    /// Called once from the view layer to kick off async setup.
+    func initialSetup() async {
+        guard !hasPerformedSetup else { return }
+        hasPerformedSetup = true
+
+        systemMonitor.startMonitoring()
+        idleDetector.startDetecting()
+
+        await kwaaiNetManager.refreshStatus()
+        if kwaaiNetManager.status.isRunning {
+            creditLedger.startContribution()
+        }
+
+        startGovernorLoop()
+        setupTerminationHandler()
+    }
+
+    /// Toggle contribution on or off.
+    func toggleContribution() async {
+        if kwaaiNetManager.status.isRunning {
+            resourceGovernor.isManuallyPaused = true
+            creditLedger.stopContribution()
+            await kwaaiNetManager.stop()
+        } else {
+            resourceGovernor.isManuallyPaused = false
+            await kwaaiNetManager.start()
+            if kwaaiNetManager.status.isRunning {
+                creditLedger.startContribution()
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func evaluateContribution() {
+        if !autoContribute {
+            governorTask?.cancel()
+            governorTask = nil
+        } else {
+            startGovernorLoop()
+        }
+    }
+
+    private func startGovernorLoop() {
+        governorTask?.cancel()
+        governorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { break }
+                guard let self else { break }
+                guard self.autoContribute else { continue }
+
+                let evaluation = self.resourceGovernor.evaluate()
+
+                if evaluation.shouldContribute
+                    && !self.kwaaiNetManager.status.isRunning
+                    && !self.kwaaiNetManager.isTransitioning {
+                    await self.kwaaiNetManager.start()
+                    if self.kwaaiNetManager.status.isRunning {
+                        self.creditLedger.startContribution()
+                    }
+                } else if !evaluation.shouldContribute
+                    && self.kwaaiNetManager.status.isRunning
+                    && !self.kwaaiNetManager.isTransitioning {
+                    self.creditLedger.stopContribution()
+                    await self.kwaaiNetManager.stop()
+                }
+            }
+        }
+    }
+
+    private func setupTerminationHandler() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                self.handleTermination()
+            }
+        }
+    }
+
+    private func handleTermination() {
+        creditLedger.stopContribution()
+        guard kwaaiNetManager.status.isRunning,
+              let binary = kwaaiNetManager.binaryPath else { return }
+
+        Logger.app.info("App terminating, stopping kwaainet")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["stop"]
+        guard (try? process.run()) != nil else { return }
+
+        // Wait up to 3 seconds for graceful shutdown, then force-kill
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            process.waitUntilExit()
+            semaphore.signal()
+        }
+        if semaphore.wait(timeout: .now() + 3) == .timedOut {
+            process.terminate()
+            Logger.app.warning("kwaainet stop timed out, sent SIGTERM")
+        }
+    }
+}

@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Build Release Archive
+        run: |
+          xcodebuild archive \
+            -project Fallow/Fallow.xcodeproj \
+            -scheme Fallow \
+            -archivePath build/Fallow.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      # TODO: Code signing with Developer ID
+      # Requires secrets:
+      #   APPLE_DEVELOPER_CERTIFICATE_P12_BASE64
+      #   APPLE_DEVELOPER_CERTIFICATE_PASSWORD
+      #   APPLE_TEAM_ID
+      #
+      # Steps:
+      # 1. Import certificate from secrets into temporary keychain
+      # 2. Re-sign kwaainet and p2pd binaries with Developer ID
+      # 3. Sign the app with Developer ID Application certificate
+      # 4. Verify with: codesign --verify --deep --strict Fallow.app
+
+      # TODO: Notarisation with Apple
+      # Requires secrets:
+      #   APPLE_ID
+      #   APPLE_APP_SPECIFIC_PASSWORD
+      #   APPLE_TEAM_ID
+      #
+      # Steps:
+      # 1. Create ZIP or DMG of signed app
+      # 2. xcrun notarytool submit --apple-id ... --password ... --team-id ...
+      # 3. xcrun notarytool wait <submission-id>
+      # 4. xcrun stapler staple Fallow.app
+
+      # TODO: Create DMG
+      # Steps:
+      # 1. Create temporary DMG directory
+      # 2. Copy Fallow.app into it
+      # 3. Add Applications symlink
+      # 4. hdiutil create -volname Fallow -srcfolder ... -ov -format UDZO Fallow.dmg
+      # 5. Staple the DMG: xcrun stapler staple Fallow.dmg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: true
+          # files: build/Fallow.dmg  # Uncomment when DMG creation is implemented
