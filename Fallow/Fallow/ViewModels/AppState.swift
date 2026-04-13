@@ -29,16 +29,12 @@ package final class AppState {
     /// SF Symbol name for the menu bar icon.
     package var menuBarIcon: String {
         if kwaaiNetManager.isTransitioning {
-            return "arrow.triangle.2.circlepath"
+            return "leaf.arrow.circlepath"
         }
-        return kwaaiNetManager.status.isDaemonRunning ? "circle.fill" : "circle"
-    }
-
-    /// Colour for the menu bar icon.
-    package var menuBarColour: Color {
-        if kwaaiNetManager.isTransitioning { return .orange }
-        if systemMonitor.memoryPressure == .critical { return .red }
-        return kwaaiNetManager.status.isDaemonRunning ? .green : .secondary
+        if systemMonitor.memoryPressure == .critical {
+            return "exclamationmark.triangle.fill"
+        }
+        return kwaaiNetManager.status.isDaemonRunning ? "leaf.fill" : "leaf"
     }
 
     /// Human-readable status string.

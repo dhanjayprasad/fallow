@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Chat backend switched from `kwaainet shard api` (HuggingFace SafeTensors, 5GB download) to `kwaainet serve <ollama-model>` (uses local Ollama models, GPU-accelerated). Eliminates download requirement.
+- Daemon and chat API are now started independently. Daemon (~73MB) starts on Start Contributing; chat API (~2GB+) starts only when chat window opens, stops on close.
+- Memory pressure now distinct governor reason (was incorrectly reported as thermal pressure).
+- Menu bar icon shows transitioning state and critical memory warning (was static green/grey circle).
+
+### Removed
+- Auto-download flow (DownloadState, downloadModel, disk space settings) - no longer needed.
+- Dead code: PortChecker.checkKwaaiNetPorts, identifyProcess, AppState.menuBarColour.
+
+### Fixed
+- stopChatApi blocking the main actor on waitUntilExit (now async via Task.detached).
+- start() incorrectly checked API port; now only checks P2P port.
+- Chat window auto-retried failed starts on every appear; now requires explicit Retry button.
+- Release entitlements missing network.server and Ollama models read access.
+- Stale serve stderr reads could deadlock pipe; now read after termination.
+
 ### Added
 - macOS menu bar app with status indicator (green/red dot)
 - KwaaiNet two-service management: P2P daemon (port 8080) and API server (port 11435)

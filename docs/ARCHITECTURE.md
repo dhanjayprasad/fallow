@@ -22,9 +22,10 @@ Fallow is a native macOS menu bar app that supervises a bundled [KwaaiNet](https
 |  PortChecker      AuthTokenManager             |
 |  BinaryVerifier   Logging                      |
 +-----------------------------------------------+
-|  KwaaiNet (two supervised processes)           |
+|  KwaaiNet (supervised processes)               |
 |  kwaainet start --daemon (P2P, port 8080)      |
-|  kwaainet serve --port 11435 (local API)       |
+|  kwaainet serve <ollama-model> (chat API,      |
+|    port 11435, started on demand)              |
 +-----------------------------------------------+
 ```
 
@@ -67,7 +68,7 @@ Fallow/
 
 **All observable classes are @MainActor.** This ensures thread safety under Swift 6 strict concurrency. ProcessRunner uses `Task.detached` to avoid blocking the main actor during subprocess execution.
 
-**KwaaiNet runs as two supervised processes.** The P2P daemon (`kwaainet start --daemon`) handles network contribution on port 8080 via p2pd. The API server (`kwaainet serve --port 11435`) provides the local OpenAI-compatible interface for chat. Daemon health is checked via the `kwaainet status` CLI; API health via `GET /v1/models`.
+**Two supervised processes, started independently.** The P2P daemon (`kwaainet start --daemon`) runs on Start Contributing and uses ~73MB of memory. The chat API (`kwaainet serve <ollama-model>`) starts only when the chat window opens and uses GPU-accelerated llama.cpp with a local Ollama model (~2GB for llama3.2:3b). Daemon health via `kwaainet status` CLI; API health via `GET /v1/models`. The chat window stops the API on close to free memory.
 
 **ResourceGovernor is a pure policy engine.** It reads state from SystemMonitoring and IdleDetecting protocols (enabling mock injection for tests), evaluates a set of gates (idle, charging, thermal, quiet hours), and reports whether contribution should proceed. AppState's governor loop acts on its recommendations.
 
@@ -82,9 +83,11 @@ Fallow/
 | Start P2P daemon | CLI | `kwaainet start --daemon` (port 8080 via p2pd) |
 | Stop P2P daemon | CLI | `kwaainet stop` |
 | Daemon health | CLI | `kwaainet status` (parse for "Running") |
-| Start API server | Process | `kwaainet serve --port 11435` (long-running) |
+| Start chat API | Process | `kwaainet serve --port 11435 <ollama-model>` (lazy, on chat open) |
+| Stop chat API | SIGTERM | Sent on chat window close |
 | Model discovery | HTTP GET | `localhost:11435/v1/models` |
 | Chat completions | HTTP POST (SSE) | `localhost:11435/v1/chat/completions` |
 | First-run setup | CLI | `kwaainet setup` (if `~/.kwaainet/config.yaml` missing) |
+| Local model detection | Filesystem | `~/.ollama/models/manifests/registry.ollama.ai/library/` |
 
 See [KWAAINET_INTEGRATION.md](KWAAINET_INTEGRATION.md) for detailed integration notes.

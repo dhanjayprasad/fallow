@@ -29,16 +29,6 @@ package enum SetupState: Sendable, Equatable {
     case failed(String)
 }
 
-/// State of model download.
-package enum DownloadState: Sendable, Equatable {
-    case notStarted
-    case checking
-    case insufficientDisk(needGB: Int, haveGB: Int)
-    case downloading(message: String)
-    case completed
-    case failed(String)
-}
-
 /// Network port configuration for KwaaiNet services.
 package enum KwaaiNetPorts {
     /// Port for the local OpenAI-compatible API (kwaainet serve).
@@ -55,12 +45,12 @@ package final class KwaaiNetManager {
     package private(set) var isTransitioning = false
     package private(set) var lastError: String?
     package private(set) var setupState: SetupState = .notNeeded
-    package private(set) var downloadState: DownloadState = .notStarted
     package private(set) var currentAuthToken: String?
 
     private var healthCheckTask: Task<Void, Never>?
     private var serveProcess: Process?
     private var serveStderrPipe: Pipe?
+    private var lastChatStartFailed = false
 
     /// URLSession with a short timeout for API checks.
     private static let apiSession: URLSession = {
@@ -84,7 +74,8 @@ package final class KwaaiNetManager {
         #endif
     }
 
-    /// Starts the KwaaiNet P2P daemon and local API server.
+    /// Starts the KwaaiNet P2P daemon for network contribution.
+    /// The local chat API is started lazily via startChatApi().
     package func start() async {
         guard !isTransitioning else { return }
         guard let binary = binaryPath else {
@@ -95,7 +86,7 @@ package final class KwaaiNetManager {
 
         isTransitioning = true
         lastError = nil
-        Logger.kwaainet.info("Starting KwaaiNet services")
+        Logger.kwaainet.info("Starting KwaaiNet daemon")
 
         // 1. Verify binary code signature (Release builds only)
         let verification = BinaryVerifier.verify(binaryPath: binary)
@@ -106,19 +97,10 @@ package final class KwaaiNetManager {
             return
         }
 
-        // 2. Check port availability
-        var portsToCheck: [UInt16] = [KwaaiNetPorts.api]
-        // Only check P2P port if no daemon is already running
-        if !status.isDaemonRunning {
-            portsToCheck.append(KwaaiNetPorts.p2p)
-        }
-        let conflicts = portsToCheck.compactMap { port in
-            PortChecker.isPortAvailable(port) ? nil : PortChecker.Conflict(port: port, processName: nil)
-        }
-        if !conflicts.isEmpty {
-            let desc = conflicts.map { "Port \($0.port)" }.joined(separator: ", ")
-            lastError = "\(desc) already in use. KwaaiNet cannot start."
-            Logger.network.error("Port conflicts detected: \(desc)")
+        // 2. Check ONLY the P2P port (API port is checked lazily by startChatApi)
+        if !PortChecker.isPortAvailable(KwaaiNetPorts.p2p) && !status.isDaemonRunning {
+            lastError = "Port \(KwaaiNetPorts.p2p) already in use. KwaaiNet cannot start."
+            Logger.network.error("Port \(KwaaiNetPorts.p2p) conflict")
             isTransitioning = false
             return
         }
@@ -126,7 +108,7 @@ package final class KwaaiNetManager {
         // 3. First-run setup detection
         if needsSetup() {
             setupState = .running("Setting up KwaaiNet configuration...")
-            Logger.kwaainet.info("First-run setup needed, running kwaainet setup")
+            Logger.kwaainet.info("First-run setup needed")
 
             do {
                 let setupResult = try await ProcessRunner.run(
@@ -152,7 +134,7 @@ package final class KwaaiNetManager {
         // 4. Generate auth token for this session
         currentAuthToken = AuthTokenManager.generateToken()
 
-        // 5. Start P2P daemon for network contribution
+        // 5. Start P2P daemon (only this; chat API is opt-in)
         do {
             var env: [String: String] = [:]
             if let token = currentAuthToken {
@@ -167,7 +149,6 @@ package final class KwaaiNetManager {
 
             if !result.succeeded {
                 let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                // Non-fatal: daemon might already be running
                 if !err.contains("already running") {
                     Logger.kwaainet.warning("kwaainet start --daemon: \(err)")
                 }
@@ -176,12 +157,7 @@ package final class KwaaiNetManager {
             Logger.kwaainet.warning("Failed to start P2P daemon: \(error)")
         }
 
-        // Note: the chat API server (kwaainet shard api) is NOT started here.
-        // It requires the full model files locally (~5GB) and would crash
-        // low-RAM machines. Chat is opt-in via startChatApi() called from
-        // the chat window when the user explicitly wants to chat.
-
-        // Verify daemon actually started
+        // 6. Verify daemon started
         try? await Task.sleep(for: .seconds(2))
         await refreshStatus()
         if status.isDaemonRunning {
@@ -193,131 +169,81 @@ package final class KwaaiNetManager {
         isTransitioning = false
     }
 
-    /// Starts the chat API server (kwaainet shard api). This requires the
-    /// model files in the local HuggingFace cache and may use significant
-    /// memory. Call only when the user explicitly opens chat.
-    /// If autoDownload is true and the model is missing, attempts to
-    /// download it first (subject to disk space check).
-    package func startChatApi(autoDownload: Bool = true, diskReserveGB: Int = 2) async {
+    /// Starts the chat API server using a local Ollama model.
+    /// Auto-detects the best model for this machine. Call when chat opens.
+    /// Resets the failure guard on explicit user retry.
+    package func startChatApi(retry: Bool = false) async {
         guard serveProcess == nil else { return }
+        if lastChatStartFailed && !retry {
+            // Don't auto-retry on failure; user must explicitly retry
+            return
+        }
         guard let binary = binaryPath else {
             lastError = "kwaainet binary not found"
+            lastChatStartFailed = true
             return
         }
 
-        // First attempt: try to start directly (model may already be cached)
+        // Check API port availability
+        if !PortChecker.isPortAvailable(KwaaiNetPorts.api) {
+            lastError = "Port \(KwaaiNetPorts.api) already in use. Stop the conflicting service."
+            lastChatStartFailed = true
+            return
+        }
+
+        // Detect a local Ollama model to use
+        guard let model = OllamaModels.bestAvailable() else {
+            lastError = "No Ollama models found. Install one with: ollama pull llama3.2:3b"
+            lastChatStartFailed = true
+            return
+        }
+        Logger.kwaainet.info("Starting chat API with model: \(model)")
+
         do {
-            try startShardApiProcess(binary: binary)
+            try startServeProcess(binary: binary, model: model)
         } catch {
             lastError = "Failed to start chat API: \(error.localizedDescription)"
+            lastChatStartFailed = true
             return
         }
 
-        var ready = await waitForApi(timeoutSeconds: 15)
+        let ready = await waitForApi(timeoutSeconds: 30)
         if !ready {
-            let stderr = readServeStderr()
-            // Stop the failed process before potentially downloading
+            // Read stderr after termination to avoid pipe deadlock
             serveProcess?.terminate()
+            serveProcess?.waitUntilExit()
+            let stderr = readServeStderr()
             serveProcess = nil
             serveStderrPipe = nil
 
             if stderr.contains("not found in local cache") {
-                if autoDownload {
-                    let downloaded = await downloadModel(
-                        binary: binary,
-                        diskReserveGB: diskReserveGB
-                    )
-                    if !downloaded { return }
-
-                    // Retry start after successful download
-                    do {
-                        try startShardApiProcess(binary: binary)
-                    } catch {
-                        lastError = "Failed to start chat API after download: \(error.localizedDescription)"
-                        return
-                    }
-                    ready = await waitForApi(timeoutSeconds: 30)
-                    if !ready {
-                        lastError = "Chat API did not become ready after download"
-                        serveProcess?.terminate()
-                        serveProcess = nil
-                        return
-                    }
-                } else {
-                    lastError = "Model not downloaded. Enable auto-download in Settings."
-                    downloadState = .notStarted
-                    return
-                }
+                lastError = "Model '\(model)' missing. Run: ollama pull \(model)"
             } else if !stderr.isEmpty {
                 lastError = "Chat API failed: \(stderr.prefix(200))"
-                return
             } else {
                 lastError = "Chat API did not become ready"
-                return
             }
+            lastChatStartFailed = true
+        } else {
+            lastChatStartFailed = false
+            await refreshStatus()
         }
-
-        await refreshStatus()
-    }
-
-    /// Downloads the configured model via kwaainet shard download.
-    /// Checks disk space before downloading. Updates downloadState during.
-    private func downloadModel(binary: String, diskReserveGB: Int) async -> Bool {
-        downloadState = .checking
-
-        // Estimate space needed: ~2GB per block (Llama 3.1 8B) * 4 blocks + tokenizer = ~9GB
-        // We download all weight files for the local block range, plus full tokenizer.
-        let estimatedNeedGB = 6
-        let availableGB = availableDiskGB()
-        if availableGB - estimatedNeedGB < diskReserveGB {
-            downloadState = .insufficientDisk(needGB: estimatedNeedGB, haveGB: availableGB)
-            lastError = "Not enough disk space. Need ~\(estimatedNeedGB)GB free (have \(availableGB)GB)."
-            return false
-        }
-
-        downloadState = .downloading(message: "Downloading model (this can take a while)...")
-        Logger.kwaainet.info("Starting model download")
-
-        do {
-            let result = try await ProcessRunner.run(
-                executablePath: binary,
-                arguments: ["shard", "download"]
-            )
-            if !result.succeeded {
-                let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                downloadState = .failed(err)
-                lastError = "Model download failed: \(err.prefix(200))"
-                return false
-            }
-            downloadState = .completed
-            Logger.kwaainet.info("Model download completed")
-            return true
-        } catch {
-            downloadState = .failed(error.localizedDescription)
-            lastError = "Model download failed: \(error.localizedDescription)"
-            return false
-        }
-    }
-
-    /// Returns available disk space in GB on the user's volume.
-    private func availableDiskGB() -> Int {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
-              let bytes = values.volumeAvailableCapacity else {
-            return 0
-        }
-        return bytes / (1024 * 1024 * 1024)
     }
 
     /// Stops the chat API server but keeps the daemon running.
-    package func stopChatApi() {
-        if let serve = serveProcess, serve.isRunning {
+    /// Async to avoid blocking the main actor on waitUntilExit.
+    package func stopChatApi() async {
+        guard let serve = serveProcess else { return }
+        if serve.isRunning {
             serve.terminate()
-            serve.waitUntilExit()
+            await Task.detached {
+                serve.waitUntilExit()
+            }.value
         }
         serveProcess = nil
         serveStderrPipe = nil
         status.isApiRunning = false
+        status.modelName = nil
     }
 
     /// Stops all KwaaiNet services.
@@ -330,13 +256,8 @@ package final class KwaaiNetManager {
         stopHealthPolling()
         Logger.kwaainet.info("Stopping KwaaiNet services")
 
-        // Stop the serve process first
-        if let serve = serveProcess, serve.isRunning {
-            serve.terminate()
-            serve.waitUntilExit()
-        }
-        serveProcess = nil
-        serveStderrPipe = nil
+        // Stop the chat API first (off-main to avoid blocking)
+        await stopChatApi()
 
         // Stop the P2P daemon
         do {
@@ -355,6 +276,7 @@ package final class KwaaiNetManager {
         try? await Task.sleep(for: .seconds(1))
         await refreshStatus()
         currentAuthToken = nil
+        lastChatStartFailed = false
         isTransitioning = false
     }
 
@@ -375,8 +297,9 @@ package final class KwaaiNetManager {
         }
 
         // Check API server via HTTP
-        let apiBase = "http://localhost:\(KwaaiNetPorts.api)"
-        guard let request = authenticatedRequest(url: "\(apiBase)/v1/models") else {
+        guard let request = authenticatedRequest(
+            url: "http://localhost:\(KwaaiNetPorts.api)/v1/models"
+        ) else {
             status.isApiRunning = false
             return
         }
@@ -414,13 +337,12 @@ package final class KwaaiNetManager {
 
     // MARK: - Private
 
-    private func startShardApiProcess(binary: String) throws {
+    private func startServeProcess(binary: String, model: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
-
-        // shard api uses distributed inference: hosts a few blocks locally,
-        // routes the rest through the P2P network. Much lighter than serve.
-        process.arguments = ["shard", "api", "--port", "\(KwaaiNetPorts.api)"]
+        // kwaainet serve is GPU-accelerated llama.cpp inference using local Ollama models.
+        // Much lighter than shard api (no HF download) and faster (Metal GPU).
+        process.arguments = ["serve", "--port", "\(KwaaiNetPorts.api)", model]
 
         let stderrPipe = Pipe()
         process.standardOutput = FileHandle.nullDevice
@@ -435,14 +357,14 @@ package final class KwaaiNetManager {
 
         try process.run()
         serveProcess = process
-        Logger.kwaainet.info("Started kwaainet serve on port \(KwaaiNetPorts.api)")
+        Logger.kwaainet.info("Started kwaainet serve with model \(model) on port \(KwaaiNetPorts.api)")
     }
 
     /// Reads any accumulated stderr from the serve process.
+    /// Should be called only after process termination to avoid pipe deadlock.
     private func readServeStderr() -> String {
         guard let pipe = serveStderrPipe else { return "" }
-        let data = pipe.fileHandleForReading.availableData
-        guard !data.isEmpty else { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
     }
 
@@ -459,21 +381,16 @@ package final class KwaaiNetManager {
     private func needsSetup() -> Bool {
         let configPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".kwaainet/config.yaml").path
-        let exists = FileManager.default.fileExists(atPath: configPath)
-        if !exists {
-            Logger.kwaainet.info("KwaaiNet config not found at \(configPath)")
-        }
-        return !exists
+        return !FileManager.default.fileExists(atPath: configPath)
     }
 
     /// Polls the API endpoint until it responds or the timeout expires.
     private func waitForApi(timeoutSeconds: Int) async -> Bool {
-        let apiBase = "http://localhost:\(KwaaiNetPorts.api)"
         for _ in 0..<timeoutSeconds {
             try? await Task.sleep(for: .seconds(1))
-            guard let request = authenticatedRequest(url: "\(apiBase)/v1/models") else {
-                return false
-            }
+            guard let request = authenticatedRequest(
+                url: "http://localhost:\(KwaaiNetPorts.api)/v1/models"
+            ) else { return false }
             do {
                 let (_, response) = try await Self.apiSession.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {

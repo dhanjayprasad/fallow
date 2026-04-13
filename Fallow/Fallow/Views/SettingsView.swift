@@ -33,20 +33,28 @@ package struct SettingsView: View {
                 }
             }
 
-            Section("Chat") {
-                Toggle(
-                    "Auto-download model when chat opens",
-                    isOn: $governor.settings.autoDownloadModel
-                )
-
-                Picker(
-                    "Keep at least this much disk free",
-                    selection: $governor.settings.diskSpaceReserveGB
-                ) {
-                    Text("1 GB").tag(1)
-                    Text("2 GB").tag(2)
-                    Text("5 GB").tag(5)
-                    Text("10 GB").tag(10)
+            Section("Available Models") {
+                let models = OllamaModels.available()
+                if models.isEmpty {
+                    Text("No Ollama models found.")
+                        .foregroundStyle(.secondary)
+                    Text("Install one with: ollama pull llama3.2:3b")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    ForEach(models, id: \.self) { model in
+                        HStack {
+                            Image(systemName: "cube.box")
+                                .foregroundStyle(.tint)
+                            Text(model)
+                            if model == OllamaModels.bestAvailable() {
+                                Text("(default)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
 

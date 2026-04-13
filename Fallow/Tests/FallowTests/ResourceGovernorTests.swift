@@ -12,7 +12,8 @@ import Foundation
 final class MockSystemMonitor: SystemMonitoring {
     var isCharging: Bool = true
     var isLowPowerMode: Bool = false
-    var isSystemHealthy: Bool = true
+    var isThermallyHealthy: Bool = true
+    var memoryPressure: MemoryPressure = .normal
 }
 
 @MainActor
@@ -73,12 +74,34 @@ struct ResourceGovernorTests {
     @MainActor @Test("Blocks when thermal pressure is high")
     func blockedThermalPressure() {
         let monitor = MockSystemMonitor()
-        monitor.isSystemHealthy = false
+        monitor.isThermallyHealthy = false
         let detector = MockIdleDetector()
         let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
         let result = governor.evaluate()
         #expect(result.shouldContribute == false)
         #expect(result.reason == .thermalPressure)
+    }
+
+    @MainActor @Test("Blocks when memory pressure is warning or critical")
+    func blockedMemoryPressure() {
+        let monitor = MockSystemMonitor()
+        monitor.memoryPressure = .warning
+        let detector = MockIdleDetector()
+        let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
+        let result = governor.evaluate()
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .memoryPressure)
+    }
+
+    @MainActor @Test("Blocks when memory pressure is critical (separate reason)")
+    func blockedCriticalMemoryPressure() {
+        let monitor = MockSystemMonitor()
+        monitor.memoryPressure = .critical
+        let detector = MockIdleDetector()
+        let governor = ResourceGovernor(systemMonitor: monitor, idleDetector: detector)
+        let result = governor.evaluate()
+        #expect(result.shouldContribute == false)
+        #expect(result.reason == .memoryPressure)
     }
 
     @MainActor @Test("Manual pause takes precedence over all conditions")

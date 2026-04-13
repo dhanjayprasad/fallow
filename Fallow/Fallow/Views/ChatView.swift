@@ -121,14 +121,15 @@ package struct ChatView: View {
         }
         .frame(minWidth: 400, minHeight: 500)
         .task {
-            // Lazily start the chat API only when the chat window opens
+            // Lazily start the chat API only when the chat window opens.
+            // Won't auto-retry on failure; user must use Retry button.
             if !appState.kwaaiNetManager.status.isApiRunning {
-                let settings = appState.resourceGovernor.settings
-                await appState.kwaaiNetManager.startChatApi(
-                    autoDownload: settings.autoDownloadModel,
-                    diskReserveGB: settings.diskSpaceReserveGB
-                )
+                await appState.kwaaiNetManager.startChatApi()
             }
+        }
+        .onDisappear {
+            // Free memory when chat closes; daemon keeps running
+            Task { await appState.kwaaiNetManager.stopChatApi() }
         }
     }
 
@@ -140,26 +141,23 @@ package struct ChatView: View {
             Text("Start a conversation")
                 .foregroundStyle(.secondary)
             if !appState.kwaaiNetManager.status.isApiRunning {
-                if case .downloading(let msg) = appState.kwaaiNetManager.downloadState {
-                    HStack(spacing: 6) {
-                        ProgressView().scaleEffect(0.6)
-                        Text(msg)
-                            .font(.caption)
-                    }
-                    .padding(.horizontal)
-                } else if case .insufficientDisk(let need, let have) = appState.kwaaiNetManager.downloadState {
-                    Text("Need ~\(need)GB free, have \(have)GB. Free up space or disable auto-download.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                } else {
+                VStack(spacing: 8) {
                     Text(appState.kwaaiNetManager.lastError
                         ?? "Starting chat API... this may take a moment.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(appState.kwaaiNetManager.lastError != nil ? .red : .orange)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+
+                    if appState.kwaaiNetManager.lastError != nil {
+                        Button("Retry") {
+                            Task {
+                                await appState.kwaaiNetManager.startChatApi(retry: true)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
             }
         }

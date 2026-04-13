@@ -25,7 +25,15 @@ package enum MemoryPressure: String, Sendable {
 package protocol SystemMonitoring: AnyObject {
     var isCharging: Bool { get }
     var isLowPowerMode: Bool { get }
-    var isSystemHealthy: Bool { get }
+    var isThermallyHealthy: Bool { get }
+    var memoryPressure: MemoryPressure { get }
+}
+
+extension SystemMonitoring {
+    /// Whether the system is healthy on both thermal and memory dimensions.
+    package var isSystemHealthy: Bool {
+        isThermallyHealthy && memoryPressure == .normal
+    }
 }
 
 @MainActor
@@ -40,11 +48,9 @@ package final class SystemMonitor: SystemMonitoring {
 
     private var monitorTask: Task<Void, Never>?
 
-    /// Whether the system is in a healthy thermal AND memory state.
-    package var isSystemHealthy: Bool {
-        let thermalOK = thermalState == .nominal || thermalState == .fair
-        let memoryOK = memoryPressure == .normal
-        return thermalOK && memoryOK
+    /// Whether the thermal state is acceptable for contribution.
+    package var isThermallyHealthy: Bool {
+        thermalState == .nominal || thermalState == .fair
     }
 
     /// Whether the Mac is plugged in to power.

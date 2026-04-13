@@ -24,11 +24,6 @@ package struct GovernorSettings: Codable, Sendable {
     package var quietHoursEnabled: Bool = false
     package var quietHoursStart: Int = 23
     package var quietHoursEnd: Int = 7
-    /// If true, Fallow downloads the model automatically when chat is opened
-    /// and the model isn't cached. Disable to require manual download.
-    package var autoDownloadModel: Bool = true
-    /// Minimum free disk space (GB) to keep after downloading the model.
-    package var diskSpaceReserveGB: Int = 2
 
     package static let defaultSettings = GovernorSettings()
 
@@ -37,17 +32,13 @@ package struct GovernorSettings: Codable, Sendable {
         idleThresholdMinutes: Int = 5,
         quietHoursEnabled: Bool = false,
         quietHoursStart: Int = 23,
-        quietHoursEnd: Int = 7,
-        autoDownloadModel: Bool = true,
-        diskSpaceReserveGB: Int = 2
+        quietHoursEnd: Int = 7
     ) {
         self.requireCharging = requireCharging
         self.idleThresholdMinutes = idleThresholdMinutes
         self.quietHoursEnabled = quietHoursEnabled
         self.quietHoursStart = quietHoursStart
         self.quietHoursEnd = quietHoursEnd
-        self.autoDownloadModel = autoDownloadModel
-        self.diskSpaceReserveGB = diskSpaceReserveGB
     }
 }
 
@@ -103,8 +94,13 @@ package final class ResourceGovernor {
             return (false, reason)
         }
 
-        if !systemMonitor.isSystemHealthy {
+        if !systemMonitor.isThermallyHealthy {
             reason = .thermalPressure
+            return (false, reason)
+        }
+
+        if systemMonitor.memoryPressure != .normal {
+            reason = .memoryPressure
             return (false, reason)
         }
 

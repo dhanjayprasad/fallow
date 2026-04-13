@@ -17,8 +17,7 @@ struct FallowApp: App {
             Label {
                 Text("Fallow")
             } icon: {
-                Image(systemName: appState.kwaaiNetManager.status.isRunning
-                    ? "leaf.fill" : "leaf")
+                Image(systemName: appState.menuBarIcon)
             }
         }
         .menuBarExtraStyle(.window)

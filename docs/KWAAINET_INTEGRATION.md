@@ -8,12 +8,12 @@ Fallow was developed and tested against **KwaaiNet v0.4.1**. Pin to a specific t
 
 ## Architecture
 
-Fallow manages TWO KwaaiNet services:
+Fallow manages TWO KwaaiNet processes, started **independently**:
 
-1. **P2P daemon** (`kwaainet start --daemon`): joins the distributed network, serves model shards to peers. Uses port 8080 (via p2pd).
-2. **Local API server** (`kwaainet serve --port 11435`): serves an OpenAI-compatible HTTP API for the chat interface. Uses port 11435.
+1. **P2P daemon** (`kwaainet start --daemon`): joins the distributed network, serves model shards to peers. Uses port 8080 via p2pd. Memory: ~73MB. Started on "Start Contributing".
+2. **Chat API** (`kwaainet serve --port 11435 <ollama-model>`): GPU-accelerated llama.cpp inference using a local Ollama model. Memory: ~2-8GB depending on model. Started lazily when the chat window opens, stopped when it closes.
 
-Both are started when the user clicks "Start Contributing" and stopped on "Stop Contributing" or app quit.
+This separation prevents low-RAM machines from freezing: contribution is lightweight, and chat is opt-in with explicit memory cost.
 
 ## Binary Location
 
@@ -34,7 +34,7 @@ Both must be signed with the same Developer ID before the outer app is signed.
 | `kwaainet start --daemon` | Launch P2P background node | KwaaiNetManager.start() |
 | `kwaainet stop` | Graceful daemon shutdown | KwaaiNetManager.stop() |
 | `kwaainet status` | Show daemon running state | KwaaiNetManager.refreshStatus() |
-| `kwaainet serve --port 11435` | Start local OpenAI API server | KwaaiNetManager.start() |
+| `kwaainet serve --port 11435 <ollama-model>` | Start chat API with Ollama model | KwaaiNetManager.startChatApi() |
 
 ## HTTP API
 
@@ -89,12 +89,14 @@ In Release builds, Fallow verifies the kwaainet binary's code signature using `S
 
 6. **Graceful shutdown.** `kwaainet stop` takes ~5 seconds to drain P2P connections. The serve process is terminated directly via SIGTERM.
 
-7. **Local models.** `kwaainet serve` requires a local model (e.g., Ollama's `llama3.1:8b`). If no model is available, serve fails with "Model not found in local cache."
+7. **Local models required for chat.** `kwaainet serve` uses Ollama models. Fallow auto-detects available models in `~/.ollama/models/manifests/registry.ollama.ai/library/` and picks the smallest preferred family (llama3.2 > gemma3 > qwen2.5 > phi > mistral > llama3.1 > llama3 > gemma4). Install models via `ollama pull llama3.2:3b`.
+
+8. **Memory pressure auto-stop.** Fallow reads kernel memory pressure via `host_statistics64` and force-stops contribution on critical pressure, even if manually started. Protects low-RAM machines (8GB and below).
 
 ## What Fallow Does NOT Do
 
 - Fallow does not modify KwaaiNet configuration files
 - Fallow does not call `kwaainet update`
-- Fallow does not manage model downloads (requires Ollama or manual setup)
+- Fallow does not download models (relies on Ollama-installed models)
 - Fallow does not expose KwaaiNet's network ports to the internet
 - Fallow does not claim to verify inference output correctness
