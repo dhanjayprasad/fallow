@@ -57,13 +57,23 @@ enum ProcessRunner {
         }.value
     }
 
-    /// Searches the system PATH for an executable with the given name.
+    /// Searches the system PATH (plus common install locations) for an executable.
+    /// GUI apps launched via `open` get a minimal PATH, so we extend it with
+    /// common locations where kwaainet and similar tools are installed.
     static func findInPath(_ name: String) -> String? {
-        let pathDirs = ProcessInfo.processInfo.environment["PATH"]?
-            .split(separator: ":")
-            .map(String.init) ?? []
+        let envPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
 
-        for dir in pathDirs {
+        var dirs = envPath.split(separator: ":").map(String.init)
+        // Add common install locations not typically in a GUI app's PATH
+        dirs.append(contentsOf: [
+            "\(home)/.cargo/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+        ])
+
+        for dir in dirs {
             let fullPath = (dir as NSString).appendingPathComponent(name)
             if FileManager.default.isExecutableFile(atPath: fullPath) {
                 return fullPath

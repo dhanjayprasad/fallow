@@ -3,6 +3,7 @@
 // Part of Fallow. MIT licence.
 
 import SwiftUI
+import AppKit
 
 package struct StatusMenuView: View {
     @Bindable package var appState: AppState
@@ -18,6 +19,12 @@ package struct StatusMenuView: View {
         } else {
             statusContent
         }
+    }
+
+    private func openWindowActivated(id: String) {
+        openWindow(id: id)
+        // LSUIElement apps do not auto-activate; bring windows to the front
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     private var statusContent: some View {
@@ -67,10 +74,9 @@ package struct StatusMenuView: View {
                     systemImage: appState.kwaaiNetManager.status.isRunning
                         ? "stop.fill" : "play.fill"
                 )
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(appState.kwaaiNetManager.isTransitioning)
-            .buttonStyle(.plain)
+            .buttonStyle(MenuRowButtonStyle())
 
             Toggle("Auto-contribute when idle", isOn: $appState.autoContribute)
                 .toggleStyle(.switch)
@@ -101,32 +107,60 @@ package struct StatusMenuView: View {
 
             // Actions
             Button {
-                openWindow(id: "chat")
+                openWindowActivated(id: "chat")
             } label: {
                 Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MenuRowButtonStyle())
 
             Button {
-                openWindow(id: "settings")
+                openWindowActivated(id: "settings")
             } label: {
                 Label("Settings...", systemImage: "gear")
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MenuRowButtonStyle())
 
             Divider()
 
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
-                Text("Quit Fallow")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Label("Quit Fallow", systemImage: "power")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MenuRowButtonStyle())
         }
-        .padding()
+        .padding(8)
         .frame(width: 280)
+    }
+}
+
+/// A button style that mimics native menu row feedback: hover highlight,
+/// press state, and full-width click target.
+private struct MenuRowButtonStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(background(for: configuration))
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHovering = hovering
+            }
+    }
+
+    private func background(for configuration: Configuration) -> Color {
+        if configuration.isPressed {
+            return Color.accentColor.opacity(0.25)
+        } else if isHovering {
+            return Color.primary.opacity(0.08)
+        } else {
+            return .clear
+        }
     }
 }
