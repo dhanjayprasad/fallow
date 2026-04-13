@@ -63,6 +63,9 @@ package final class AppState {
 
     private var governorTask: Task<Void, Never>?
     private var hasPerformedSetup = false
+    /// Set to true when the user manually starts contribution.
+    /// The governor loop will not auto-stop in this case.
+    private var manuallyStarted = false
 
     package init() {
         let manager = KwaaiNetManager()
@@ -116,10 +119,12 @@ package final class AppState {
     /// Toggle contribution on or off.
     package func toggleContribution() async {
         if kwaaiNetManager.status.isRunning {
+            manuallyStarted = false
             resourceGovernor.isManuallyPaused = true
             creditLedger.stopContribution()
             await kwaaiNetManager.stop()
         } else {
+            manuallyStarted = true
             resourceGovernor.isManuallyPaused = false
             await kwaaiNetManager.start()
             if kwaaiNetManager.status.isRunning {
@@ -159,7 +164,10 @@ package final class AppState {
                     }
                 } else if !evaluation.shouldContribute
                     && self.kwaaiNetManager.status.isRunning
-                    && !self.kwaaiNetManager.isTransitioning {
+                    && !self.kwaaiNetManager.isTransitioning
+                    && !self.manuallyStarted {
+                    // Only auto-stop if not manually started by the user.
+                    // Manual start should persist until manual stop.
                     self.creditLedger.stopContribution()
                     await self.kwaaiNetManager.stop()
                 }

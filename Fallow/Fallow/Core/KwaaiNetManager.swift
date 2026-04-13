@@ -320,27 +320,44 @@ package final class KwaaiNetManager {
     }
 
     /// Detects a local model available for kwaainet serve.
-    /// Checks Ollama's manifest directory and returns the first available model.
+    /// Enumerates ALL Ollama models in ~/.ollama/models/manifests and returns
+    /// the first one found, preferring smaller/faster models when possible.
     /// Returns nil to let kwaainet use its config default.
     private func resolveServeModel(binary: String) -> String? {
-        // Check Ollama manifests directory for locally cached models
-        let ollamaDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ollama/models/manifests/registry.ollama.ai/library")
         let fm = FileManager.default
+        let ollamaLibrary = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ollama/models/manifests/registry.ollama.ai/library")
 
-        // Preferred models in order
-        let preferredModels = ["llama3.1", "llama3.2", "llama3", "mistral", "qwen2.5"]
+        guard let modelNames = try? fm.contentsOfDirectory(atPath: ollamaLibrary.path),
+              !modelNames.isEmpty else {
+            Logger.kwaainet.info("No Ollama models found; using config default")
+            return nil
+        }
 
-        for preferred in preferredModels {
-            let modelDir = ollamaDir.appendingPathComponent(preferred)
-            if let tags = try? fm.contentsOfDirectory(atPath: modelDir.path), !tags.isEmpty {
-                // Return first tag, e.g. llama3.1:8b
-                return "\(preferred):\(tags[0])"
+        // Collect all available model:tag pairs
+        var available: [String] = []
+        for modelName in modelNames {
+            let modelDir = ollamaLibrary.appendingPathComponent(modelName)
+            if let tags = try? fm.contentsOfDirectory(atPath: modelDir.path) {
+                for tag in tags where !tag.hasPrefix(".") {
+                    available.append("\(modelName):\(tag)")
+                }
             }
         }
 
-        // No Ollama models found; let kwaainet use the config model
-        return nil
+        if available.isEmpty {
+            return nil
+        }
+
+        // Prefer known-good model families in order; otherwise return first available
+        let preferredPrefixes = ["llama3.2", "llama3.1", "llama3", "qwen2.5", "mistral", "gemma"]
+        for prefix in preferredPrefixes {
+            if let match = available.first(where: { $0.hasPrefix(prefix) }) {
+                return match
+            }
+        }
+
+        return available.first
     }
 
     /// Reads any accumulated stderr from the serve process.
