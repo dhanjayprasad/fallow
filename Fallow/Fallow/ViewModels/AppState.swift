@@ -21,9 +21,9 @@ package final class AppState {
     }
 
     /// Whether the user has completed the onboarding consent flow.
+    /// Backed by a stored property so @Observable tracks changes for SwiftUI.
     package var hasCompletedOnboarding: Bool {
-        get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
-        set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
+        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
     }
 
     /// SF Symbol name for the menu bar icon.
@@ -78,6 +78,7 @@ package final class AppState {
             systemMonitor: monitor,
             idleDetector: detector
         )
+        self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
         Logger.app.info("AppState initialised")
     }
