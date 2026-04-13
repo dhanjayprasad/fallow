@@ -123,7 +123,11 @@ package struct ChatView: View {
         .task {
             // Lazily start the chat API only when the chat window opens
             if !appState.kwaaiNetManager.status.isApiRunning {
-                await appState.kwaaiNetManager.startChatApi()
+                let settings = appState.resourceGovernor.settings
+                await appState.kwaaiNetManager.startChatApi(
+                    autoDownload: settings.autoDownloadModel,
+                    diskReserveGB: settings.diskSpaceReserveGB
+                )
             }
         }
     }
@@ -136,12 +140,27 @@ package struct ChatView: View {
             Text("Start a conversation")
                 .foregroundStyle(.secondary)
             if !appState.kwaaiNetManager.status.isApiRunning {
-                Text(appState.kwaaiNetManager.lastError
-                    ?? "Starting chat API... this may take a moment.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.center)
+                if case .downloading(let msg) = appState.kwaaiNetManager.downloadState {
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.6)
+                        Text(msg)
+                            .font(.caption)
+                    }
                     .padding(.horizontal)
+                } else if case .insufficientDisk(let need, let have) = appState.kwaaiNetManager.downloadState {
+                    Text("Need ~\(need)GB free, have \(have)GB. Free up space or disable auto-download.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                } else {
+                    Text(appState.kwaaiNetManager.lastError
+                        ?? "Starting chat API... this may take a moment.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -33,6 +33,23 @@ package struct SettingsView: View {
                 }
             }
 
+            Section("Chat") {
+                Toggle(
+                    "Auto-download model when chat opens",
+                    isOn: $governor.settings.autoDownloadModel
+                )
+
+                Picker(
+                    "Keep at least this much disk free",
+                    selection: $governor.settings.diskSpaceReserveGB
+                ) {
+                    Text("1 GB").tag(1)
+                    Text("2 GB").tag(2)
+                    Text("5 GB").tag(5)
+                    Text("10 GB").tag(10)
+                }
+            }
+
             Section("Quiet Hours") {
                 Toggle(
                     "Enable quiet hours",
@@ -61,19 +78,26 @@ package struct SettingsView: View {
             }
 
             Section("Status") {
-                LabeledContent("KwaaiNet") {
-                    Text(
-                        appState.kwaaiNetManager.status.isRunning
-                            ? "Running" : "Stopped"
-                    )
-                    .foregroundStyle(
-                        appState.kwaaiNetManager.status.isRunning
-                            ? .green : .secondary
-                    )
+                LabeledContent("Daemon") {
+                    Text(appState.kwaaiNetManager.status.isDaemonRunning ? "Running" : "Stopped")
+                        .foregroundStyle(appState.kwaaiNetManager.status.isDaemonRunning ? .green : .secondary)
+                }
+                LabeledContent("Chat API") {
+                    Text(appState.kwaaiNetManager.status.isApiRunning ? "Running" : "Stopped")
+                        .foregroundStyle(appState.kwaaiNetManager.status.isApiRunning ? .green : .secondary)
                 }
 
                 if let model = appState.kwaaiNetManager.status.modelName {
                     LabeledContent("Model", value: model)
+                }
+
+                LabeledContent(
+                    "System RAM",
+                    value: "\(appState.systemMonitor.totalRAMGB) GB"
+                )
+                LabeledContent("Memory pressure") {
+                    Text(appState.systemMonitor.memoryPressure.rawValue.capitalized)
+                        .foregroundStyle(memoryPressureColour)
                 }
 
                 LabeledContent(
@@ -100,6 +124,14 @@ package struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 400, height: 500)
+    }
+
+    private var memoryPressureColour: Color {
+        switch appState.systemMonitor.memoryPressure {
+        case .normal: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
     }
 
     private static let hourFormatter: DateFormatter = {

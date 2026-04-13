@@ -29,6 +29,16 @@ package enum SetupState: Sendable, Equatable {
     case failed(String)
 }
 
+/// State of model download.
+package enum DownloadState: Sendable, Equatable {
+    case notStarted
+    case checking
+    case insufficientDisk(needGB: Int, haveGB: Int)
+    case downloading(message: String)
+    case completed
+    case failed(String)
+}
+
 /// Network port configuration for KwaaiNet services.
 package enum KwaaiNetPorts {
     /// Port for the local OpenAI-compatible API (kwaainet serve).
@@ -45,6 +55,7 @@ package final class KwaaiNetManager {
     package private(set) var isTransitioning = false
     package private(set) var lastError: String?
     package private(set) var setupState: SetupState = .notNeeded
+    package private(set) var downloadState: DownloadState = .notStarted
     package private(set) var currentAuthToken: String?
 
     private var healthCheckTask: Task<Void, Never>?
@@ -185,13 +196,16 @@ package final class KwaaiNetManager {
     /// Starts the chat API server (kwaainet shard api). This requires the
     /// model files in the local HuggingFace cache and may use significant
     /// memory. Call only when the user explicitly opens chat.
-    package func startChatApi() async {
+    /// If autoDownload is true and the model is missing, attempts to
+    /// download it first (subject to disk space check).
+    package func startChatApi(autoDownload: Bool = true, diskReserveGB: Int = 2) async {
         guard serveProcess == nil else { return }
         guard let binary = binaryPath else {
             lastError = "kwaainet binary not found"
             return
         }
 
+        // First attempt: try to start directly (model may already be cached)
         do {
             try startShardApiProcess(binary: binary)
         } catch {
@@ -199,23 +213,100 @@ package final class KwaaiNetManager {
             return
         }
 
-        let ready = await waitForApi(timeoutSeconds: 30)
+        var ready = await waitForApi(timeoutSeconds: 15)
         if !ready {
             let stderr = readServeStderr()
-            if stderr.contains("not found in local cache") {
-                lastError = "Chat needs model files. Run: kwaainet shard download"
-            } else if !stderr.isEmpty {
-                lastError = "Chat API failed: \(stderr.prefix(200))"
-            } else {
-                lastError = "Chat API did not become ready"
-            }
-            // Stop the failed process
+            // Stop the failed process before potentially downloading
             serveProcess?.terminate()
             serveProcess = nil
             serveStderrPipe = nil
-        } else {
-            await refreshStatus()
+
+            if stderr.contains("not found in local cache") {
+                if autoDownload {
+                    let downloaded = await downloadModel(
+                        binary: binary,
+                        diskReserveGB: diskReserveGB
+                    )
+                    if !downloaded { return }
+
+                    // Retry start after successful download
+                    do {
+                        try startShardApiProcess(binary: binary)
+                    } catch {
+                        lastError = "Failed to start chat API after download: \(error.localizedDescription)"
+                        return
+                    }
+                    ready = await waitForApi(timeoutSeconds: 30)
+                    if !ready {
+                        lastError = "Chat API did not become ready after download"
+                        serveProcess?.terminate()
+                        serveProcess = nil
+                        return
+                    }
+                } else {
+                    lastError = "Model not downloaded. Enable auto-download in Settings."
+                    downloadState = .notStarted
+                    return
+                }
+            } else if !stderr.isEmpty {
+                lastError = "Chat API failed: \(stderr.prefix(200))"
+                return
+            } else {
+                lastError = "Chat API did not become ready"
+                return
+            }
         }
+
+        await refreshStatus()
+    }
+
+    /// Downloads the configured model via kwaainet shard download.
+    /// Checks disk space before downloading. Updates downloadState during.
+    private func downloadModel(binary: String, diskReserveGB: Int) async -> Bool {
+        downloadState = .checking
+
+        // Estimate space needed: ~2GB per block (Llama 3.1 8B) * 4 blocks + tokenizer = ~9GB
+        // We download all weight files for the local block range, plus full tokenizer.
+        let estimatedNeedGB = 6
+        let availableGB = availableDiskGB()
+        if availableGB - estimatedNeedGB < diskReserveGB {
+            downloadState = .insufficientDisk(needGB: estimatedNeedGB, haveGB: availableGB)
+            lastError = "Not enough disk space. Need ~\(estimatedNeedGB)GB free (have \(availableGB)GB)."
+            return false
+        }
+
+        downloadState = .downloading(message: "Downloading model (this can take a while)...")
+        Logger.kwaainet.info("Starting model download")
+
+        do {
+            let result = try await ProcessRunner.run(
+                executablePath: binary,
+                arguments: ["shard", "download"]
+            )
+            if !result.succeeded {
+                let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                downloadState = .failed(err)
+                lastError = "Model download failed: \(err.prefix(200))"
+                return false
+            }
+            downloadState = .completed
+            Logger.kwaainet.info("Model download completed")
+            return true
+        } catch {
+            downloadState = .failed(error.localizedDescription)
+            lastError = "Model download failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Returns available disk space in GB on the user's volume.
+    private func availableDiskGB() -> Int {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+              let bytes = values.volumeAvailableCapacity else {
+            return 0
+        }
+        return bytes / (1024 * 1024 * 1024)
     }
 
     /// Stops the chat API server but keeps the daemon running.
