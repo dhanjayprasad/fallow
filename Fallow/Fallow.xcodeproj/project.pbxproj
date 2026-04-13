@@ -24,6 +24,7 @@
 		FA000000000000000000004E /* PortChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000030 /* PortChecker.swift */; };
 		FA000000000000000000004F /* AuthTokenManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000031 /* AuthTokenManager.swift */; };
 		FA0000000000000000000050 /* BinaryVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000032 /* BinaryVerifier.swift */; };
+		FA0000000000000000000051 /* OllamaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000034 /* OllamaModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		FA0000000000000000000031 /* AuthTokenManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthTokenManager.swift; sourceTree = "<group>"; };
 		FA0000000000000000000032 /* BinaryVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinaryVerifier.swift; sourceTree = "<group>"; };
 		FA0000000000000000000033 /* FallowRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FallowRelease.entitlements; sourceTree = "<group>"; };
+		FA0000000000000000000034 /* OllamaModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -105,6 +107,7 @@
 				FA0000000000000000000030 /* PortChecker.swift */,
 				FA0000000000000000000031 /* AuthTokenManager.swift */,
 				FA0000000000000000000032 /* BinaryVerifier.swift */,
+				FA0000000000000000000034 /* OllamaModels.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -221,6 +224,7 @@
 				FA000000000000000000004E /* PortChecker.swift in Sources */,
 				FA000000000000000000004F /* AuthTokenManager.swift in Sources */,
 				FA0000000000000000000050 /* BinaryVerifier.swift in Sources */,
+				FA0000000000000000000051 /* OllamaModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

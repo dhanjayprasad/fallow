@@ -209,9 +209,12 @@ package final class KwaaiNetManager {
 
         let ready = await waitForApi(timeoutSeconds: 30)
         if !ready {
-            // Read stderr after termination to avoid pipe deadlock
-            serveProcess?.terminate()
-            serveProcess?.waitUntilExit()
+            // Read stderr after termination to avoid pipe deadlock.
+            // Run waitUntilExit off the main actor.
+            if let serve = serveProcess {
+                serve.terminate()
+                await Task.detached { serve.waitUntilExit() }.value
+            }
             let stderr = readServeStderr()
             serveProcess = nil
             serveStderrPipe = nil

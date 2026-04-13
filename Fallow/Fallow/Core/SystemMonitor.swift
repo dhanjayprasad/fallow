@@ -29,13 +29,6 @@ package protocol SystemMonitoring: AnyObject {
     var memoryPressure: MemoryPressure { get }
 }
 
-extension SystemMonitoring {
-    /// Whether the system is healthy on both thermal and memory dimensions.
-    package var isSystemHealthy: Bool {
-        isThermallyHealthy && memoryPressure == .normal
-    }
-}
-
 @MainActor
 @Observable
 package final class SystemMonitor: SystemMonitoring {
