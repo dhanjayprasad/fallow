@@ -14,8 +14,12 @@ struct FallowApp: App {
             StatusMenuView(appState: appState)
                 .task { await appState.initialSetup() }
         } label: {
-            Image(systemName: appState.menuBarIcon)
-                .foregroundStyle(appState.menuBarColour)
+            Label {
+                Text("Fallow")
+            } icon: {
+                Image(systemName: appState.kwaaiNetManager.status.isRunning
+                    ? "leaf.fill" : "leaf")
+            }
         }
         .menuBarExtraStyle(.window)
 
