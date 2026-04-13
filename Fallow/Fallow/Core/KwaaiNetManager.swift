@@ -49,6 +49,7 @@ package final class KwaaiNetManager {
 
     private var healthCheckTask: Task<Void, Never>?
     private var serveProcess: Process?
+    private var serveStderrPipe: Pipe?
 
     /// URLSession with a short timeout for API checks.
     private static let apiSession: URLSession = {
@@ -164,9 +165,13 @@ package final class KwaaiNetManager {
             Logger.kwaainet.warning("Failed to start P2P daemon: \(error)")
         }
 
-        // 6. Start local API server (kwaainet serve) as a long-running process
+        // 6. Resolve a local model to serve (config default may not be cached)
+        let modelToServe = resolveServeModel(binary: binary)
+        Logger.kwaainet.info("Will serve model: \(modelToServe ?? "config default")")
+
+        // 7. Start local API server (kwaainet serve) as a long-running process
         do {
-            try startServeProcess(binary: binary)
+            try startServeProcess(binary: binary, model: modelToServe)
         } catch {
             lastError = "Failed to start API server: \(error.localizedDescription)"
             Logger.kwaainet.error("Failed to start kwaainet serve: \(error)")
@@ -174,11 +179,18 @@ package final class KwaaiNetManager {
             return
         }
 
-        // 7. Wait for the API to become ready
-        let ready = await waitForApi(timeoutSeconds: 30)
+        // 8. Wait for the API to become ready
+        let ready = await waitForApi(timeoutSeconds: 60)
         if !ready {
-            lastError = "KwaaiNet API did not become ready in time"
-            Logger.kwaainet.warning("API did not respond within timeout")
+            let stderr = readServeStderr()
+            if stderr.contains("not found in local cache") {
+                lastError = "No local model available. Install one with `ollama pull llama3.1:8b`."
+            } else if !stderr.isEmpty {
+                lastError = "API server failed: \(stderr.prefix(200))"
+            } else {
+                lastError = "KwaaiNet API did not become ready in time"
+            }
+            Logger.kwaainet.warning("API did not respond within timeout. stderr: \(stderr)")
         }
 
         await refreshStatus()
@@ -203,8 +215,9 @@ package final class KwaaiNetManager {
         if let serve = serveProcess, serve.isRunning {
             serve.terminate()
             serve.waitUntilExit()
-            serveProcess = nil
         }
+        serveProcess = nil
+        serveStderrPipe = nil
 
         // Stop the P2P daemon
         do {
@@ -282,12 +295,18 @@ package final class KwaaiNetManager {
 
     // MARK: - Private
 
-    private func startServeProcess(binary: String) throws {
+    private func startServeProcess(binary: String, model: String?) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["serve", "--port", "\(KwaaiNetPorts.api)"]
+
+        var args = ["serve", "--port", "\(KwaaiNetPorts.api)"]
+        if let model { args.append(model) }
+        process.arguments = args
+
+        let stderrPipe = Pipe()
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderrPipe
+        serveStderrPipe = stderrPipe
 
         if let token = currentAuthToken {
             var env = ProcessInfo.processInfo.environment
@@ -298,6 +317,38 @@ package final class KwaaiNetManager {
         try process.run()
         serveProcess = process
         Logger.kwaainet.info("Started kwaainet serve on port \(KwaaiNetPorts.api)")
+    }
+
+    /// Detects a local model available for kwaainet serve.
+    /// Checks Ollama's manifest directory and returns the first available model.
+    /// Returns nil to let kwaainet use its config default.
+    private func resolveServeModel(binary: String) -> String? {
+        // Check Ollama manifests directory for locally cached models
+        let ollamaDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ollama/models/manifests/registry.ollama.ai/library")
+        let fm = FileManager.default
+
+        // Preferred models in order
+        let preferredModels = ["llama3.1", "llama3.2", "llama3", "mistral", "qwen2.5"]
+
+        for preferred in preferredModels {
+            let modelDir = ollamaDir.appendingPathComponent(preferred)
+            if let tags = try? fm.contentsOfDirectory(atPath: modelDir.path), !tags.isEmpty {
+                // Return first tag, e.g. llama3.1:8b
+                return "\(preferred):\(tags[0])"
+            }
+        }
+
+        // No Ollama models found; let kwaainet use the config model
+        return nil
+    }
+
+    /// Reads any accumulated stderr from the serve process.
+    private func readServeStderr() -> String {
+        guard let pipe = serveStderrPipe else { return "" }
+        let data = pipe.fileHandleForReading.availableData
+        guard !data.isEmpty else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func authenticatedRequest(url: String) -> URLRequest? {
