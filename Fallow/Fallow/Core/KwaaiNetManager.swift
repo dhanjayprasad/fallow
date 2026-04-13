@@ -165,40 +165,68 @@ package final class KwaaiNetManager {
             Logger.kwaainet.warning("Failed to start P2P daemon: \(error)")
         }
 
-        // 6. Resolve a local model to serve (config default may not be cached)
-        let modelToServe = resolveServeModel(binary: binary)
-        Logger.kwaainet.info("Will serve model: \(modelToServe ?? "config default")")
+        // Note: the chat API server (kwaainet shard api) is NOT started here.
+        // It requires the full model files locally (~5GB) and would crash
+        // low-RAM machines. Chat is opt-in via startChatApi() called from
+        // the chat window when the user explicitly wants to chat.
 
-        // 7. Start local API server (kwaainet serve) as a long-running process
-        do {
-            try startServeProcess(binary: binary, model: modelToServe)
-        } catch {
-            lastError = "Failed to start API server: \(error.localizedDescription)"
-            Logger.kwaainet.error("Failed to start kwaainet serve: \(error)")
-            isTransitioning = false
-            return
-        }
-
-        // 8. Wait for the API to become ready
-        let ready = await waitForApi(timeoutSeconds: 60)
-        if !ready {
-            let stderr = readServeStderr()
-            if stderr.contains("not found in local cache") {
-                lastError = "No local model available. Install one with `ollama pull llama3.1:8b`."
-            } else if !stderr.isEmpty {
-                lastError = "API server failed: \(stderr.prefix(200))"
-            } else {
-                lastError = "KwaaiNet API did not become ready in time"
-            }
-            Logger.kwaainet.warning("API did not respond within timeout. stderr: \(stderr)")
-        }
-
+        // Verify daemon actually started
+        try? await Task.sleep(for: .seconds(2))
         await refreshStatus()
-        if status.isRunning {
+        if status.isDaemonRunning {
             startHealthPolling()
+        } else {
+            lastError = "Daemon did not start"
         }
 
         isTransitioning = false
+    }
+
+    /// Starts the chat API server (kwaainet shard api). This requires the
+    /// model files in the local HuggingFace cache and may use significant
+    /// memory. Call only when the user explicitly opens chat.
+    package func startChatApi() async {
+        guard serveProcess == nil else { return }
+        guard let binary = binaryPath else {
+            lastError = "kwaainet binary not found"
+            return
+        }
+
+        do {
+            try startShardApiProcess(binary: binary)
+        } catch {
+            lastError = "Failed to start chat API: \(error.localizedDescription)"
+            return
+        }
+
+        let ready = await waitForApi(timeoutSeconds: 30)
+        if !ready {
+            let stderr = readServeStderr()
+            if stderr.contains("not found in local cache") {
+                lastError = "Chat needs model files. Run: kwaainet shard download"
+            } else if !stderr.isEmpty {
+                lastError = "Chat API failed: \(stderr.prefix(200))"
+            } else {
+                lastError = "Chat API did not become ready"
+            }
+            // Stop the failed process
+            serveProcess?.terminate()
+            serveProcess = nil
+            serveStderrPipe = nil
+        } else {
+            await refreshStatus()
+        }
+    }
+
+    /// Stops the chat API server but keeps the daemon running.
+    package func stopChatApi() {
+        if let serve = serveProcess, serve.isRunning {
+            serve.terminate()
+            serve.waitUntilExit()
+        }
+        serveProcess = nil
+        serveStderrPipe = nil
+        status.isApiRunning = false
     }
 
     /// Stops all KwaaiNet services.
@@ -295,13 +323,13 @@ package final class KwaaiNetManager {
 
     // MARK: - Private
 
-    private func startServeProcess(binary: String, model: String?) throws {
+    private func startShardApiProcess(binary: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
 
-        var args = ["serve", "--port", "\(KwaaiNetPorts.api)"]
-        if let model { args.append(model) }
-        process.arguments = args
+        // shard api uses distributed inference: hosts a few blocks locally,
+        // routes the rest through the P2P network. Much lighter than serve.
+        process.arguments = ["shard", "api", "--port", "\(KwaaiNetPorts.api)"]
 
         let stderrPipe = Pipe()
         process.standardOutput = FileHandle.nullDevice
@@ -317,47 +345,6 @@ package final class KwaaiNetManager {
         try process.run()
         serveProcess = process
         Logger.kwaainet.info("Started kwaainet serve on port \(KwaaiNetPorts.api)")
-    }
-
-    /// Detects a local model available for kwaainet serve.
-    /// Enumerates ALL Ollama models in ~/.ollama/models/manifests and returns
-    /// the first one found, preferring smaller/faster models when possible.
-    /// Returns nil to let kwaainet use its config default.
-    private func resolveServeModel(binary: String) -> String? {
-        let fm = FileManager.default
-        let ollamaLibrary = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ollama/models/manifests/registry.ollama.ai/library")
-
-        guard let modelNames = try? fm.contentsOfDirectory(atPath: ollamaLibrary.path),
-              !modelNames.isEmpty else {
-            Logger.kwaainet.info("No Ollama models found; using config default")
-            return nil
-        }
-
-        // Collect all available model:tag pairs
-        var available: [String] = []
-        for modelName in modelNames {
-            let modelDir = ollamaLibrary.appendingPathComponent(modelName)
-            if let tags = try? fm.contentsOfDirectory(atPath: modelDir.path) {
-                for tag in tags where !tag.hasPrefix(".") {
-                    available.append("\(modelName):\(tag)")
-                }
-            }
-        }
-
-        if available.isEmpty {
-            return nil
-        }
-
-        // Prefer known-good model families in order; otherwise return first available
-        let preferredPrefixes = ["llama3.2", "llama3.1", "llama3", "qwen2.5", "mistral", "gemma"]
-        for prefix in preferredPrefixes {
-            if let match = available.first(where: { $0.hasPrefix(prefix) }) {
-                return match
-            }
-        }
-
-        return available.first
     }
 
     /// Reads any accumulated stderr from the serve process.

@@ -12,6 +12,7 @@ package enum GovernorReason: String, Sendable {
     case onBattery = "Paused: running on battery"
     case lowPowerMode = "Paused: Low Power Mode is on"
     case thermalPressure = "Paused: Mac is running hot"
+    case memoryPressure = "Paused: low system memory"
     case quietHours = "Paused: quiet hours active"
     case manuallyPaused = "Manually paused"
 }

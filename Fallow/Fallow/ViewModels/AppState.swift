@@ -31,23 +31,21 @@ package final class AppState {
         if kwaaiNetManager.isTransitioning {
             return "arrow.triangle.2.circlepath"
         }
-        return kwaaiNetManager.status.isRunning ? "circle.fill" : "circle"
+        return kwaaiNetManager.status.isDaemonRunning ? "circle.fill" : "circle"
     }
 
     /// Colour for the menu bar icon.
     package var menuBarColour: Color {
         if kwaaiNetManager.isTransitioning { return .orange }
-        return kwaaiNetManager.status.isRunning ? .green : .secondary
+        if systemMonitor.memoryPressure == .critical { return .red }
+        return kwaaiNetManager.status.isDaemonRunning ? .green : .secondary
     }
 
     /// Human-readable status string.
     package var statusText: String {
         if kwaaiNetManager.isTransitioning { return "Starting..." }
-        if !kwaaiNetManager.status.isRunning { return "Stopped" }
-        if let model = kwaaiNetManager.status.modelName {
-            return "Contributing: \(model)"
-        }
-        return "Running"
+        if !kwaaiNetManager.status.isDaemonRunning { return "Stopped" }
+        return "Contributing"
     }
 
     /// Formatted contribution time.
@@ -95,7 +93,7 @@ package final class AppState {
         idleDetector.startDetecting()
 
         await kwaaiNetManager.refreshStatus()
-        if kwaaiNetManager.status.isRunning {
+        if kwaaiNetManager.status.isDaemonRunning {
             kwaaiNetManager.startHealthPolling()
             // Only start earning credits if the user has already given consent
             if hasCompletedOnboarding {
@@ -118,7 +116,7 @@ package final class AppState {
 
     /// Toggle contribution on or off.
     package func toggleContribution() async {
-        if kwaaiNetManager.status.isRunning {
+        if kwaaiNetManager.status.isDaemonRunning {
             manuallyStarted = false
             resourceGovernor.isManuallyPaused = true
             creditLedger.stopContribution()
@@ -127,7 +125,7 @@ package final class AppState {
             manuallyStarted = true
             resourceGovernor.isManuallyPaused = false
             await kwaaiNetManager.start()
-            if kwaaiNetManager.status.isRunning {
+            if kwaaiNetManager.status.isDaemonRunning {
                 creditLedger.startContribution()
             }
         }
@@ -151,19 +149,32 @@ package final class AppState {
                 try? await Task.sleep(for: .seconds(15))
                 guard !Task.isCancelled else { break }
                 guard let self else { break }
+
+                // CRITICAL: Always force-stop on critical memory pressure,
+                // even for manual starts. Protects the user's machine.
+                if self.systemMonitor.memoryPressure == .critical
+                    && self.kwaaiNetManager.status.isDaemonRunning
+                    && !self.kwaaiNetManager.isTransitioning {
+                    Logger.app.warning("Critical memory pressure: force-stopping contribution")
+                    self.creditLedger.stopContribution()
+                    await self.kwaaiNetManager.stop()
+                    self.manuallyStarted = false
+                    continue
+                }
+
                 guard self.autoContribute else { continue }
 
                 let evaluation = self.resourceGovernor.evaluate()
 
                 if evaluation.shouldContribute
-                    && !self.kwaaiNetManager.status.isRunning
+                    && !self.kwaaiNetManager.status.isDaemonRunning
                     && !self.kwaaiNetManager.isTransitioning {
                     await self.kwaaiNetManager.start()
-                    if self.kwaaiNetManager.status.isRunning {
+                    if self.kwaaiNetManager.status.isDaemonRunning {
                         self.creditLedger.startContribution()
                     }
                 } else if !evaluation.shouldContribute
-                    && self.kwaaiNetManager.status.isRunning
+                    && self.kwaaiNetManager.status.isDaemonRunning
                     && !self.kwaaiNetManager.isTransitioning
                     && !self.manuallyStarted {
                     // Only auto-stop if not manually started by the user.
@@ -193,7 +204,7 @@ package final class AppState {
 
     private func handleTermination() {
         creditLedger.stopContribution()
-        guard kwaaiNetManager.status.isRunning,
+        guard kwaaiNetManager.status.isDaemonRunning,
               let binary = kwaaiNetManager.binaryPath else { return }
 
         Logger.app.info("App terminating, stopping kwaainet")

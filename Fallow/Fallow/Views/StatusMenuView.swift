@@ -32,7 +32,7 @@ package struct StatusMenuView: View {
             // Status header
             HStack {
                 Circle()
-                    .fill(appState.kwaaiNetManager.status.isRunning ? .green : .secondary)
+                    .fill(appState.kwaaiNetManager.status.isDaemonRunning ? .green : .secondary)
                     .frame(width: 10, height: 10)
                 Text(appState.statusText)
                     .font(.headline)
@@ -62,6 +62,17 @@ package struct StatusMenuView: View {
                     .foregroundStyle(.red)
             }
 
+            if appState.systemMonitor.memoryPressure != .normal {
+                Label(
+                    appState.systemMonitor.memoryPressure == .critical
+                        ? "Critical memory pressure"
+                        : "Low memory",
+                    systemImage: "memorychip"
+                )
+                .font(.caption)
+                .foregroundStyle(appState.systemMonitor.memoryPressure == .critical ? .red : .orange)
+            }
+
             Divider()
 
             // Controls
@@ -69,9 +80,9 @@ package struct StatusMenuView: View {
                 Task { await appState.toggleContribution() }
             } label: {
                 Label(
-                    appState.kwaaiNetManager.status.isRunning
+                    appState.kwaaiNetManager.status.isDaemonRunning
                         ? "Stop Contributing" : "Start Contributing",
-                    systemImage: appState.kwaaiNetManager.status.isRunning
+                    systemImage: appState.kwaaiNetManager.status.isDaemonRunning
                         ? "stop.fill" : "play.fill"
                 )
             }

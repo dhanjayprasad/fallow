@@ -46,6 +46,11 @@ package struct ChatView: View {
                 Text("Chat")
                     .font(.headline)
                 Spacer()
+                if appState.kwaaiNetManager.status.isApiRunning {
+                    Image(systemName: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                }
                 Text("\(String(format: "%.0f", appState.creditLedger.balance)) credits")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -115,6 +120,12 @@ package struct ChatView: View {
             .padding()
         }
         .frame(minWidth: 400, minHeight: 500)
+        .task {
+            // Lazily start the chat API only when the chat window opens
+            if !appState.kwaaiNetManager.status.isApiRunning {
+                await appState.kwaaiNetManager.startChatApi()
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -124,10 +135,13 @@ package struct ChatView: View {
                 .foregroundStyle(.tertiary)
             Text("Start a conversation")
                 .foregroundStyle(.secondary)
-            if !appState.kwaaiNetManager.status.isRunning {
-                Text("KwaaiNet node is not running. Start the node to chat.")
+            if !appState.kwaaiNetManager.status.isApiRunning {
+                Text(appState.kwaaiNetManager.lastError
+                    ?? "Starting chat API... this may take a moment.")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

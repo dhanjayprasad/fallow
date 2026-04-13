@@ -13,6 +13,13 @@ package enum PowerSource: String, Sendable {
     case unknown = "Unknown"
 }
 
+/// Memory pressure level reported by the kernel.
+package enum MemoryPressure: String, Sendable {
+    case normal
+    case warning
+    case critical
+}
+
 /// Protocol for system state monitoring, enabling test doubles.
 @MainActor
 package protocol SystemMonitoring: AnyObject {
@@ -28,17 +35,25 @@ package final class SystemMonitor: SystemMonitoring {
     package private(set) var powerSource: PowerSource = .unknown
     package private(set) var thermalState: ProcessInfo.ThermalState = .nominal
     package private(set) var isLowPowerMode: Bool = false
+    package private(set) var memoryPressure: MemoryPressure = .normal
+    package private(set) var totalRAMGB: Int = 0
 
     private var monitorTask: Task<Void, Never>?
 
-    /// Whether the system is in a healthy thermal state for contribution.
+    /// Whether the system is in a healthy thermal AND memory state.
     package var isSystemHealthy: Bool {
-        thermalState == .nominal || thermalState == .fair
+        let thermalOK = thermalState == .nominal || thermalState == .fair
+        let memoryOK = memoryPressure == .normal
+        return thermalOK && memoryOK
     }
 
     /// Whether the Mac is plugged in to power.
     package var isCharging: Bool {
         powerSource == .charger
+    }
+
+    package init() {
+        totalRAMGB = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024))
     }
 
     package func startMonitoring() {
@@ -67,6 +82,30 @@ package final class SystemMonitor: SystemMonitoring {
         thermalState = ProcessInfo.processInfo.thermalState
         isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         powerSource = currentPowerSource()
+        memoryPressure = currentMemoryPressure()
+    }
+
+    /// Reads kernel memory pressure level via host_statistics64.
+    private func currentMemoryPressure() -> MemoryPressure {
+        var stats = vm_statistics64()
+        var size = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+        let host = mach_host_self()
+        let result = withUnsafeMutablePointer(to: &stats) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { intPtr in
+                host_statistics64(host, HOST_VM_INFO64, intPtr, &size)
+            }
+        }
+        guard result == KERN_SUCCESS else { return .normal }
+
+        // Free memory ratio: anything below 5% is critical, below 15% is warning.
+        let total = Double(stats.free_count + stats.active_count + stats.inactive_count
+                           + stats.wire_count + stats.compressor_page_count)
+        guard total > 0 else { return .normal }
+        let availableRatio = Double(stats.free_count + stats.inactive_count) / total
+
+        if availableRatio < 0.05 { return .critical }
+        if availableRatio < 0.15 { return .warning }
+        return .normal
     }
 
     private func currentPowerSource() -> PowerSource {
